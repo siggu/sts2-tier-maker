@@ -3,6 +3,9 @@ main = "src/index.js"
 # Cloudflare 계정 ID (비밀 값이 아니다). 배포 토큰은 GitHub 시크릿 CLOUDFLARE_API_TOKEN 으로 넣는다.
 account_id = "b1d2ece49f3654aba38c2e31ef484072"
 compatibility_date = "2026-09-01"
+# 사이트가 https://sts2-balance-api.siggu100.workers.dev 로 호출한다.
+workers_dev = true
+preview_urls = false
 
 # 프런트엔드(GitHub Pages)에서 호출을 허용할 출처. 쉼표로 여러 개 지정.
 [vars]

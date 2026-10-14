@@ -82,3 +82,34 @@ jobs:
         if: steps.secrets.outputs.ok == 'true'
         # 처음 만든 Worker 는 업로드 직후 설정 조회가 '없는 Worker'(10007)로 실패할 수 있어 한 번 더 시도한다.
         run: npx wrangler deploy || { sleep 10; npx wrangler deploy; }
+
+      - name: 배포 확인 (상태·CORS·투표 저장 후 삭제)
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          API=https://sts2-balance-api.siggu100.workers.dev
+          ORIGIN=https://siggu.github.io
+          ITEM="$(node -e 'process.stdout.write(require("../site/data/keys.json").find(k => k.startsWith("curses/")))')"
+          VOTER="ci-smoke-${GITHUB_RUN_ID}"
+          for i in 1 2 3 4 5 6; do
+            curl -fsS "$API/health" && break
+            sleep 10
+          done
+          echo
+          curl -fsS -o /dev/null -D - -X OPTIONS -H "Origin: $ORIGIN" -H 'Access-Control-Request-Method: POST' "$API/balance" \
+            | grep -i "access-control-allow-origin: $ORIGIN"
+          curl -fsS -H "Origin: $ORIGIN" -H 'Content-Type: application/json' \
+            -d "{\"voter\":\"$VOTER\",\"votes\":[{\"item\":\"$ITEM\",\"v\":\"fair\"}]}" "$API/balance"
+          echo
+          curl -fsS "$API/balance?category=curses" | node -e '
+            const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const c = r.items[process.argv[1]];
+            if (!c || c[1] < 1) { console.error("투표가 결과에 보이지 않음", r); process.exit(1); }
+            console.log("결과 확인:", process.argv[1], c);' "$ITEM" || {
+            # 결과는 30초 캐시되므로 처음 조회에 없으면 기다렸다 다시 본다
+            sleep 35
+            curl -fsS "$API/balance?category=curses" | grep -q "\"$ITEM\""
+          }
+          curl -fsS -H 'Content-Type: application/json' \
+            -d "{\"voter\":\"$VOTER\",\"votes\":[{\"item\":\"$ITEM\",\"v\":null}]}" "$API/balance"
+          echo
+          echo "시험 투표를 지웠습니다."
