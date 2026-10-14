@@ -45,8 +45,23 @@ def build(key):
     mask[int(154 * s):int(168 * s), int(103 * s):int(137 * s)] = 255
     # 그림 칸도 지울 곳에 넣어야 뭉개진 그림 색이 배너·테두리로 번지지 않는다 (그림 칸은 어차피 뚫린다)
     mask[art > 0] = 255
-    rgb = cv2.cvtColor(med[..., :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
-    rgb = cv2.inpaint(rgb, mask, int(3 * s) or 3, cv2.INPAINT_TELEA)
+    # 카드마다 자기 글자(가운데값과 크게 다른 곳)만 얇게 지운 뒤 다시 가운데값을 낸다.
+    # 한꺼번에 넓게 지우면 배너처럼 넓은 곳이 뭉개지지만, 글자 자리는 카드마다 달라 이렇게 하면 깨끗하다.
+    k3 = np.ones((int(3 * s) | 1, int(3 * s) | 1), np.uint8)
+    cleaned = []
+    for im in st:
+        diff = np.abs(im[..., :3] - med[..., :3]).mean(axis=2)
+        m = ((diff > 28) & (art == 0)).astype(np.uint8) * 255
+        m = cv2.dilate(m, k3)
+        bgr = cv2.cvtColor(im[..., :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
+        cleaned.append(cv2.inpaint(bgr, m, int(2 * s) or 2, cv2.INPAINT_TELEA).astype(np.float32))
+    rgb = np.median(np.stack(cleaned), axis=0).astype(np.uint8)
+    # 그래도 남은 자국(비용 숫자, 종류 명판 글자 등)만 작게 지운다
+    std2 = np.stack(cleaned).std(axis=0).mean(axis=2)
+    rest = ((std2 > 14) & (art == 0)).astype(np.uint8) * 255
+    rest[int(154 * s):int(168 * s), int(103 * s):int(137 * s)] = 255
+    rest[art > 0] = 255
+    rgb = cv2.inpaint(rgb, cv2.dilate(rest, k3), int(3 * s) or 3, cv2.INPAINT_TELEA)
     alpha = med[..., 3].astype(np.uint8)
     soft = cv2.GaussianBlur(art.astype(np.float32), (0, 0), 1.2 * s)
     alpha = np.minimum(alpha, ((1 - soft) * 255).astype(np.uint8))
