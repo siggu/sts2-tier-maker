@@ -9,6 +9,21 @@ export const VERDICTS = [
   { v: 'buff', label: '버프 필요', sub: '약함', color: '#57a7d8' },
 ];
 
+// 종류마다 '사기/약함'의 뜻이 달라서 보조 설명만 바꾼다. 집계는 모두 nerf/fair/buff 3단계.
+const VERDICT_SUBS = {
+  characters: ['너무 강함', '밸런스 OK', '너무 약함'],
+  ancients: ['축복이 사기', '밸런스 OK', '축복이 약함'],
+  monsters: ['너무 어려움', '밸런스 OK', '너무 쉬움'],
+  elites: ['너무 어려움', '밸런스 OK', '너무 쉬움'],
+  bosses: ['너무 어려움', '밸런스 OK', '너무 쉬움'],
+  curses: ['너무 가혹함', '밸런스 OK', '거의 무해함'],
+};
+
+export function verdictsFor(categoryId) {
+  const subs = VERDICT_SUBS[categoryId];
+  return subs ? VERDICTS.map((v, i) => ({ ...v, sub: subs[i] })) : VERDICTS;
+}
+
 const MINE_KEY = cat => `sts2bal.v1.${cat}`;
 const PENDING_KEY = 'sts2bal.pending';
 const VOTER_KEY = 'sts2bal.voter';

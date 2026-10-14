@@ -7,7 +7,7 @@ import {
   encodeShare, decodeShare, PALETTE,
 } from './tierlist.js';
 import { renderPng } from './export.js';
-import { VERDICTS, loadMine, saveMine, queueVote, onSyncStatus, fetchResults, flush } from './balance.js';
+import { verdictsFor, loadMine, saveMine, queueVote, onSyncStatus, fetchResults, flush } from './balance.js';
 
 const app = document.getElementById('app');
 let db = null;
@@ -58,7 +58,7 @@ function viewHome(mode) {
     h('p', { class: 'eyebrow' }, 'Slay the Spire 2 · 비공식 팬 사이트'),
     h('h1', {}, isTier ? '첨탑의 티어 메이커' : '첨탑의 밸런스 투표'),
     h('p', { class: 'lead' }, isTier
-      ? '캐릭터, 보스, 카드, 유물, 포션을 끌어다 놓아 나만의 티어 리스트를 만드세요. 이미지로 저장하거나 링크로 공유할 수 있습니다.'
+      ? '캐릭터, 카드, 유물, 포션, 고대의 존재, 적까지 끌어다 놓아 나만의 티어 리스트를 만드세요. 이미지로 저장하거나 링크로 공유할 수 있습니다.'
       : '각 요소를 너프 필요 · 적당함 · 버프 필요 중 하나로 분류하세요. 모두의 표가 모여 무엇이 사기이고 무엇이 약한지 비율로 보여 줍니다.'),
   );
 
@@ -83,11 +83,14 @@ function viewHome(mode) {
     // section 별로 줄을 나눈다: 'all', 그룹 id(카드), 'rarity', 'type', 'group'
     const sectionOrder = [];
     const bySection = new Map();
+    const customLabel = new Map();
     for (const t of templates) {
       if (!bySection.has(t.section)) { bySection.set(t.section, []); sectionOrder.push(t.section); }
       bySection.get(t.section).push(t);
+      if (t.sectionLabel) customLabel.set(t.section, t.sectionLabel);
     }
     const sectionLabel = sec => {
+      if (customLabel.has(sec)) return customLabel.get(sec);
       if (sec === 'all') return null;
       if (sec === 'rarity') return '희귀도별';
       if (sec === 'type') return '종류별';
@@ -181,6 +184,7 @@ async function viewTier(templateId, shareCode) {
           h('button', { class: 'btn ghost', onclick: reset }, '초기화'),
         ),
       ),
+      template.category.enemy && h('p', { class: 'help' }, '위협도 기준입니다. S가 가장 위협적인(어려운) 상대입니다.'),
       b,
     );
   }
@@ -310,6 +314,7 @@ function viewBalance(templateId) {
   const template = db.template(templateId);
   if (!template) return notFound();
   const catId = template.category.id;
+  const VERDICTS = verdictsFor(catId);
   let mine = loadMine(catId);
   const filter = {};
   let syncText = '';
@@ -378,11 +383,16 @@ const SORTS = {
   votes: { label: '표가 많은 순', score: c => sum(c) },
 };
 const sum = c => c[0] + c[1] + c[2];
+const sortLabel = (k, verdicts) => {
+  const i = { nerf: 0, fair: 1, buff: 2 }[k];
+  return i == null ? SORTS[k].label : `${verdicts[i].sub} 비율 높은 순`;
+};
 const pct = (n, total) => (total ? Math.round((n / total) * 100) : 0);
 
 async function viewResults(templateId) {
   const template = db.template(templateId);
   if (!template) return notFound();
+  const VERDICTS = verdictsFor(template.category.id);
   let sort = 'nerf';
   let layout = 'list';
   flush();
@@ -418,7 +428,7 @@ async function viewResults(templateId) {
             h('button', { class: layout === 'board' ? 'on' : null, onclick: () => { layout = 'board'; draw(); } }, '보드'),
           ),
           layout === 'list' && h('select', { 'aria-label': '정렬', onchange: e => { sort = e.target.value; draw(); } },
-            Object.entries(SORTS).map(([k, s]) => h('option', { value: k, selected: k === sort }, s.label))),
+            Object.entries(SORTS).map(([k, s]) => h('option', { value: k, selected: k === sort }, sortLabel(k, VERDICTS)))),
         ),
       ),
       voted.length ? body : h('section', { class: 'empty' },

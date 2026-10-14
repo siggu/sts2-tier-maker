@@ -30,7 +30,7 @@ const charByEn = new Map(CHARACTERS.map(c => [c.en, c]));
 async function get(url, { binary = false, tries = 4 } = {}) {
   for (let i = 0; ; i++) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA } });
+      const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(30_000) });
       if (!res.ok) throw new Error(`${res.status} ${url}`);
       return binary ? Buffer.from(await res.arrayBuffer()) : await res.text();
     } catch (err) {
@@ -100,6 +100,8 @@ function image(file, category, id, { height, width, trim = false } = {}) {
 
 async function runImageJobs() {
   let done = 0, failed = 0, skipped = 0;
+  const total = imageJobs.length;
+  const progress = setInterval(() => console.log(`이미지 진행: ${done + failed + skipped}/${total}`), 15_000);
   const queue = imageJobs.slice();
   async function worker() {
     for (let job = queue.shift(); job; job = queue.shift()) {
@@ -122,6 +124,7 @@ async function runImageJobs() {
     }
   }
   await Promise.all(Array.from({ length: 6 }, worker));
+  clearInterval(progress);
   console.log(`이미지: ${done}개 저장, ${skipped}개 유지, ${failed}개 실패`);
 }
 
@@ -152,7 +155,8 @@ async function cards() {
   }
   return {
     id: 'cards', name: '카드', tile: 'card', groupLabel: '캐릭터',
-    split: { by: ['rarity', 'type'], groupFirst: true },
+    // 희귀도는 섞여 있어 의미가 덜하므로 캐릭터 × 종류(공격·스킬·파워)로 나눈다.
+    split: { by: ['type'], groupFirst: true },
     groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), { ...SHARED_GROUP, name: '무색' }],
     items,
   };
@@ -282,23 +286,6 @@ async function monsterCategory() {
   return { id: 'monsters', name: '일반 적', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
 }
 
-async function eventCategory() {
-  const data = await module('Module:Events/StS2 data');
-  const items = [];
-  for (const [name, e] of Object.entries(data)) {
-    const acts = [].concat(e.Act || []).map(a => areaByEn.get(String(a).replace(/^\d+\s*-\s*/, '').trim())).filter(Boolean);
-    const id = slug(name);
-    items.push({
-      id, name,
-      group: acts[0]?.id,
-      groups: acts.length > 1 ? acts.map(a => a.id) : undefined,
-      text: escapeHtml([acts.map(a => a.name).join(', '), formatPlain(e.Description)].filter(Boolean).join('\n')),
-      img: image(e.Image, 'events', id, { height: 200, width: 260 }),
-    });
-  }
-  return { id: 'events', name: '이벤트', tile: 'creature', groupLabel: '막', groups: areaGroups(items.flatMap(i => (i.groups || [i.group]).map(group => ({ group })))), items };
-}
-
 async function enchantmentCategory() {
   const data = await module('Module:Keywords/StS2 data/Enchantments');
   const items = Object.entries(data).map(([name, e]) => {
@@ -385,7 +372,6 @@ async function main() {
     await potions(),
     await enchantmentCategory(),
     ancients,
-    await eventCategory(),
     await monsterCategory(),
     await eliteCategory(),
     await bossCategory(),

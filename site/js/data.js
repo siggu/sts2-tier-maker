@@ -20,9 +20,12 @@ export const RARITY_KO = {
 };
 export const TYPE_KO = { attack: '공격', skill: '스킬', power: '파워', status: '상태이상', curse: '저주', quest: '퀘스트' };
 const FACET_KO = { rarity: '희귀도', type: '종류', group: '캐릭터' };
+const OVERFLOW_KO = { source: '고대의 존재' };
 const ORDER = {
   rarity: Object.keys(RARITY_KO),
   type: Object.keys(TYPE_KO),
+  // 고대 유물을 주는 고대의 존재: 등장 막 순서
+  source: ['Neow', 'Orobas', 'Pael', 'Tezcatara', 'Darv', 'Nonupeipe', 'Tanx', 'Vakuu'],
 };
 
 export const rarityKo = r => RARITY_KO[r] || r;
@@ -64,10 +67,14 @@ function buildIndex(raw) {
   };
 }
 
+// 한 아이템이 여러 그룹에 속할 수 있다 (예: 2막과 3막에 모두 나오는 고대의 존재).
+const inGroup = (item, g) => item.group === g.id || (item.groups || []).includes(g.id);
+
 function facetValues(items, facet) {
   const values = [...new Set(items.map(i => i[facet]).filter(Boolean))];
   const order = ORDER[facet] || [];
-  return values.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const rank = v => (order.includes(v) ? order.indexOf(v) : order.length);
+  return values.sort((a, b) => rank(a) - rank(b) || String(a).localeCompare(String(b)));
 }
 
 // 카테고리 하나에서 티어를 매길 수 있는 묶음(템플릿)들을 만든다.
@@ -77,10 +84,10 @@ function facetValues(items, facet) {
 function buildTemplates(cat) {
   const out = [];
   const by = cat.split?.by || [];
-  const add = (parts, items, section) => {
+  const add = (parts, items, section, sectionLabel) => {
     if (items.length < 2) return;
     const id = [cat.id, ...parts.map(p => (p.facet === 'group' ? p.value : `${p.facet}-${p.value}`))].join('.');
-    out.push(makeTemplate(cat, id, parts, items, section));
+    out.push({ ...makeTemplate(cat, id, parts, items, section), sectionLabel });
   };
   const group = g => ({ facet: 'group', value: g.id, label: g.name, color: g.color });
   const facet = (f, v) => ({ facet: f, value: v, label: facetLabel(f, v) });
@@ -89,7 +96,7 @@ function buildTemplates(cat) {
 
   if (cat.split?.groupFirst) {
     for (const g of cat.groups) {
-      const gi = cat.items.filter(i => i.group === g.id);
+      const gi = cat.items.filter(i => inGroup(i, g));
       if (gi.length <= TEMPLATE_LIMIT) { add([group(g)], gi, g.id); continue; }
       for (const f of by) {
         for (const v of facetValues(gi, f)) add([group(g), facet(f, v)], gi.filter(i => i[f] === v), g.id);
@@ -98,12 +105,22 @@ function buildTemplates(cat) {
     return out;
   }
 
+  const overflow = cat.split?.overflow;
   for (const f of by) {
-    for (const v of facetValues(cat.items, f)) add([facet(f, v)], cat.items.filter(i => i[f] === v), f);
+    for (const v of facetValues(cat.items, f)) {
+      const fi = cat.items.filter(i => i[f] === v);
+      // 너무 많은 묶음(예: 고대 유물 100여 개)은 overflow 필드(그 유물을 주는 고대의 존재)로 다시 나눈다.
+      if (fi.length > TEMPLATE_LIMIT && overflow) {
+        const label = `${facetLabel(f, v)} ${cat.name} (${OVERFLOW_KO[overflow] || overflow}별)`;
+        for (const o of facetValues(fi, overflow)) add([facet(f, v), facet(overflow, o)], fi.filter(i => i[overflow] === o), `${f}-${v}`, label);
+      } else {
+        add([facet(f, v)], fi, f);
+      }
+    }
   }
   for (const g of cat.groups) {
     if (g.id === cat.split?.sharedGroup) continue;
-    const gi = cat.items.filter(i => i.group === g.id);
+    const gi = cat.items.filter(i => inGroup(i, g));
     if (gi.length <= TEMPLATE_LIMIT) add([group(g)], gi, 'group');
   }
   return out;
