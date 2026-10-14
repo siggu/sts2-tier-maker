@@ -11,7 +11,7 @@ preview_urls = false
 [vars]
 ALLOWED_ORIGINS = "https://siggu.github.io,http://localhost:8000,http://127.0.0.1:8000"
 # 구글 로그인 OAuth 클라이언트 ID (공개 값). 비어 있으면 로그인이 꺼진다. site/js/config.js 와 같은 값.
-GOOGLE_CLIENT_ID = ""
+GOOGLE_CLIENT_ID = "713762759027-mo3pdgg1f1pg1jdoobqojvc5lfbo6qo9.apps.googleusercontent.com"
 # 관리자 구글 sub (쉼표로 여러 개). 관리자는 아무 글·댓글이나 지울 수 있다.
 ADMIN_SUBS = ""
 

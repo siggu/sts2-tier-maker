@@ -204,8 +204,3 @@
   .vs-pair { animation: none; }
   .vs-pick, .vs-promo { transition: none; }
 }
-
-/* 상단 메뉴에 '대결'이 붙어 좁은 화면(영어 등)에서 넘치지 않게: 메뉴가 줄어들고 가로로 넘긴다 */
-.topnav { min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.topnav::-webkit-scrollbar { display: none; }
-@media (max-width: 420px) { .topnav a { padding: 6px 9px; } }

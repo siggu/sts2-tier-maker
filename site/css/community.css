@@ -22,21 +22,6 @@
 
 /* ---------------------------------------------------------------- 상단: 로그인 / 프로필 */
 .acct-top { display: flex; align-items: center; }
-.topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
-.topnav { min-width: 0; }
-/* 로그인 칩·갤러리 메뉴가 붙으면 좁은 화면 한 줄에 다 들어가지 않는다:
-   메뉴를 아래 줄로 내려 가로로 고르게 펼친다 (넘치면 옆으로 넘김). */
-@media (max-width: 560px) {
-  .topbar:has(.acct-top) { flex-wrap: wrap; row-gap: 6px; }
-  .topbar:has(.acct-top) .topnav {
-    order: 3; flex: 1 0 100%;
-    overflow-x: auto; scrollbar-width: none;
-    margin: 0 -4px;
-  }
-  .topbar:has(.acct-top) .topnav::-webkit-scrollbar { display: none; }
-  .topbar:has(.acct-top) .topnav a { flex: 1 0 auto; text-align: center; }
-  .topbar:has(.acct-top) .brand span { display: inline; font-size: 15px; }
-}
 .acct-login-btn .ic { font-size: 15px; }
 .acct-chip {
   display: inline-flex; align-items: center; gap: 6px;
