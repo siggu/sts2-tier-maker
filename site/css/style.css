@@ -443,3 +443,20 @@ body.is-dragging * { cursor: grabbing !important; }
   .bg-embers { animation: none; }
   .tile, .btn, .tpl, .toast { transition: none; }
 }
+
+/* ---- 홈: 템플릿 묶음 ---- */
+.cat.wide { grid-column: 1 / -1; }
+.tpl-rows { display: grid; gap: 10px; }
+.tpl-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: start; }
+.tpl-row:has(> .tpl-list:only-child) { grid-template-columns: 1fr; }
+.tpl-row-label {
+  --accent: var(--gold);
+  padding: 8px 0 0 10px;
+  border-left: 3px solid var(--accent);
+  font-size: 13px; font-weight: 700; color: var(--gold-hi);
+}
+.tpl.started { background: rgba(217, 164, 65, .12); }
+@media (max-width: 640px) {
+  .tpl-row { grid-template-columns: 1fr; gap: 6px; }
+  .tpl-row-label { padding: 0 0 0 8px; }
+}

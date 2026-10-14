@@ -1,6 +1,7 @@
 // 공용 UI 조각: 타일, 툴팁, 토스트, 보드.
 
 import { enableDrag } from './dnd.js';
+import { rarityKo, typeKo } from './data.js';
 
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -24,14 +25,6 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-const RARITY_KO = {
-  basic: '기본', starter: '시작', common: '일반', uncommon: '고급', rare: '희귀',
-  special: '특수', event: '이벤트', shop: '상점', boss: '보스', ancient: '고대', curse: '저주', status: '상태이상',
-};
-const TYPE_KO = { attack: '공격', skill: '스킬', power: '파워', status: '상태이상', curse: '저주', quest: '퀘스트' };
-
-export const rarityKo = r => RARITY_KO[r] || r;
-export const typeKo = t => TYPE_KO[t] || t;
 
 export function tile(item, template, extra = {}) {
   const el = h('div', {

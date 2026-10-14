@@ -151,13 +151,25 @@ async function cards() {
     }
   }
   return {
-    id: 'cards', name: '카드', tile: 'card', splitOnly: true,
+    id: 'cards', name: '카드', tile: 'card', groupLabel: '캐릭터',
+    split: { by: ['rarity', 'type'], groupFirst: true },
     groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), { ...SHARED_GROUP, name: '무색' }],
     items,
   };
 }
 
-const RELIC_RARITIES = ['Common', 'Uncommon', 'Rare', 'Shop', 'Event', 'Ancient', 'Starter'];
+async function curses() {
+  const data = await module('Module:Cards/StS2 data/Colorless');
+  const items = Object.entries(data)
+    .filter(([, c]) => c.Rarity === 'Curse' && !c.Multiplayer)
+    .map(([name, c]) => {
+      const id = slug(name);
+      return { id, name, cost: c.Cost ?? undefined, text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) };
+    });
+  return { id: 'curses', name: '저주', tile: 'card', items };
+}
+
+const RELIC_RARITIES = ['Starter', 'Common', 'Uncommon', 'Rare', 'Shop', 'Event', 'Ancient'];
 
 async function relics() {
   const data = await module('Module:Relics/StS2 data');
@@ -170,12 +182,15 @@ async function relics() {
       id, name,
       group: ch ? ch.id : SHARED_GROUP.id,
       rarity: r.Rarity.toLowerCase(),
+      source: r.AncientSource ? String(r.AncientSource).replace(/\{\{[^|}]*\|([^}]*)\}\}/g, '$1').replace(/[\[\]]/g, '').trim() : undefined,
       text: formatText(r.Description),
       img: image(r.Image, 'relics', id, { height: 128, width: 128 }),
     });
   }
   return {
-    id: 'relics', name: '유물', tile: 'icon',
+    id: 'relics', name: '유물', tile: 'icon', groupLabel: '캐릭터',
+    // 희귀도별로 나누고, 고대 유물처럼 너무 많은 묶음은 그 유물을 주는 고대의 존재별로 다시 나눈다.
+    split: { by: ['rarity'], overflow: 'source', sharedGroup: SHARED_GROUP.id },
     groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), SHARED_GROUP],
     items,
   };
@@ -197,13 +212,21 @@ async function potions() {
     });
   }
   return {
-    id: 'potions', name: '포션', tile: 'icon',
+    id: 'potions', name: '포션', tile: 'icon', groupLabel: '캐릭터',
+    split: { by: ['rarity'], sharedGroup: SHARED_GROUP.id },
     groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), SHARED_GROUP],
     items,
   };
 }
 
-const ACTS = { Overgrowth: '1막 · Overgrowth', Underdocks: '1막 · Underdocks', Hive: '2막 · Hive', Glory: '3막 · Glory' };
+// 1막은 Overgrowth 와 Underdocks 중 하나가 무작위로 나온다.
+const AREAS = [
+  { en: 'Overgrowth', id: 'overgrowth', name: '1막 · Overgrowth', color: '#6f9a4a' },
+  { en: 'Underdocks', id: 'underdocks', name: '1막 · Underdocks', color: '#4a7f9a' },
+  { en: 'Hive', id: 'hive', name: '2막 · Hive', color: '#c99a3a' },
+  { en: 'Glory', id: 'glory', name: '3막 · Glory', color: '#a06ad0' },
+];
+const areaByEn = new Map(AREAS.map(a => [a.en, a]));
 
 // 같은 전투에 함께 나오는 적(예: The Kin = Kin Follower + Kin Priest)은 하나로 묶는다.
 function encounters(data, type) {
@@ -222,40 +245,107 @@ function encounters(data, type) {
   });
 }
 
-async function enemies(kind) {
-  const data = await module(`Module:Enemies/StS2 data/${kind === 'Boss' ? 'Bosses' : 'Elites'}`);
-  return encounters(data, kind).map(e => {
+function enemyItems(data, type, folder, fallbackArea) {
+  return encounters(data, type).map(e => {
     const id = slug(e.name);
+    const area = areaByEn.get(e.debut) || fallbackArea;
     return {
       id, name: e.name,
-      group: e.debut ? slug(e.debut) : undefined,
+      group: area?.id,
       text: escapeHtml([
-        e.debut && ACTS[e.debut],
+        area?.name,
         e.hp && `HP ${e.hp}`,
         e.members.length > 1 && e.members.map(m => m.name).join(', '),
       ].filter(Boolean).join('\n')),
-      img: image(e.first.Image, kind === 'Boss' ? 'bosses' : 'elites', id, { height: 220, width: 260, trim: true }),
+      img: image(e.first.Image, folder, id, { height: 220, width: 260, trim: true }),
     };
   });
 }
 
-function actGroups(items) {
-  return Object.entries(ACTS)
-    .filter(([en]) => items.some(i => i.group === slug(en)))
-    .map(([en, name]) => ({ id: slug(en), name }));
-}
+const areaGroups = items => AREAS.filter(a => items.some(i => i.group === a.id)).map(({ id, name, color }) => ({ id, name, color }));
 
 async function bossCategory() {
-  const items = await enemies('Boss');
-  return { id: 'bosses', name: '보스', tile: 'creature', groups: actGroups(items), items };
+  const items = enemyItems(await module('Module:Enemies/StS2 data/Bosses'), 'Boss', 'bosses');
+  return { id: 'bosses', name: '보스', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
 }
 
 async function eliteCategory() {
-  const items = await enemies('Elite');
-  return { id: 'elites', name: '엘리트', tile: 'creature', groups: actGroups(items), items };
+  const items = enemyItems(await module('Module:Enemies/StS2 data/Elites'), 'Elite', 'elites');
+  return { id: 'elites', name: '엘리트', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
 }
 
+async function monsterCategory() {
+  const items = [];
+  for (const area of AREAS) {
+    items.push(...enemyItems(await module(`Module:Enemies/StS2 data/${area.en}`), 'Normal', 'monsters', area));
+  }
+  return { id: 'monsters', name: '일반 적', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
+}
+
+async function eventCategory() {
+  const data = await module('Module:Events/StS2 data');
+  const items = [];
+  for (const [name, e] of Object.entries(data)) {
+    const acts = [].concat(e.Act || []).map(a => areaByEn.get(String(a).replace(/^\d+\s*-\s*/, '').trim())).filter(Boolean);
+    const id = slug(name);
+    items.push({
+      id, name,
+      group: acts[0]?.id,
+      groups: acts.length > 1 ? acts.map(a => a.id) : undefined,
+      text: escapeHtml([acts.map(a => a.name).join(', '), formatPlain(e.Description)].filter(Boolean).join('\n')),
+      img: image(e.Image, 'events', id, { height: 200, width: 260 }),
+    });
+  }
+  return { id: 'events', name: '이벤트', tile: 'creature', groupLabel: '막', groups: areaGroups(items.flatMap(i => (i.groups || [i.group]).map(group => ({ group })))), items };
+}
+
+async function enchantmentCategory() {
+  const data = await module('Module:Keywords/StS2 data/Enchantments');
+  const items = Object.entries(data).map(([name, e]) => {
+    const id = slug(name);
+    return { id, name, text: formatText(e.Text), img: image(e.Image, 'enchantments', id, { height: 128, width: 128 }) };
+  });
+  return { id: 'enchantments', name: '인챈트', tile: 'icon', items };
+}
+
+const formatPlain = raw => String(raw || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1').replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1').trim();
+
 const ANCIENTS = ['Neow', 'Orobas', 'Darv', 'Tezcatara', 'Tanx', 'Pael', 'Nonupeipe', 'Vakuu'];
+const ANCIENT_ACTS = [
+  { id: 'act1', name: '1막', color: '#6f9a4a' },
+  { id: 'act2', name: '2막', color: '#c99a3a' },
+  { id: 'act3', name: '3막', color: '#a06ad0' },
+];
+
+// 위키 문서의 '== Act 2 ==' 같은 구역 아래 나오는 이름으로 각 고대의 존재가 몇 막에 나오는지 알아낸다.
+// 'Act 2/3' 처럼 적힌 경우(Darv)는 두 막 모두에 넣는다.
+async function ancientActs() {
+  const acts = new Map();
+  let src = '';
+  try {
+    src = process.env.WIKI_RAW_DIR
+      ? await readFile(join(process.env.WIKI_RAW_DIR, '..', 'pages', 'Slay_the_Spire_2_Ancients.wiki'), 'utf8')
+      : await get(`${WIKI}/index.php?title=${encodeURIComponent('Slay the Spire 2:Ancients')}&action=raw`);
+  } catch { return acts; }
+  let current = [];
+  for (const line of src.split('\n')) {
+    const head = line.match(/^==\s*(.+?)\s*==\s*$/);
+    if (head) {
+      const n = head[1].match(/Act\s*(\d)/);
+      current = n ? [Number(n[1])] : [];
+      continue;
+    }
+    const multi = line.match(/Act\s*(\d)\s*\/\s*(\d)/);
+    const name = line.match(/elite-name">\{\{2\|([^}|]+)\}\}/)?.[1];
+    if (name) acts.set(name, current.slice());
+    if (multi) {
+      const last = [...acts.keys()].pop();
+      if (last) acts.set(last, [Number(multi[1]), Number(multi[2])]);
+    }
+    if (/^==\s*Effective/.test(line)) break;
+  }
+  return acts;
+}
 
 async function charactersAndAncients() {
   const data = await module('Module:Keywords/StS2 data/Characters');
@@ -264,15 +354,22 @@ async function charactersAndAncients() {
     id: c.id, name: c.name, nameEn: c.en,
     img: image(`StS2_${c.en}.png`, 'characters', c.id, { height: 240, width: 200, trim: true }),
   }));
+  const acts = await ancientActs();
   const ancients = Object.keys(data)
     .filter(name => ANCIENTS.includes(name))
-    .map(name => ({
-      id: slug(name), name,
-      img: image(`StS2_Map-${name}.png`, 'ancients', slug(name), { height: 160, width: 160 }),
-    }));
+    .map(name => {
+      const a = (acts.get(name) || []).map(n => ANCIENT_ACTS[n - 1]).filter(Boolean);
+      return {
+        id: slug(name), name,
+        group: a[0]?.id,
+        groups: a.length > 1 ? a.map(x => x.id) : undefined,
+        text: a.length ? escapeHtml(`등장: ${a.map(x => x.name).join(', ')}`) : undefined,
+        img: image(`StS2_Map-${name}.png`, 'ancients', slug(name), { height: 160, width: 160 }),
+      };
+    });
   return [
     { id: 'characters', name: '캐릭터', tile: 'portrait', items: chars },
-    { id: 'ancients', name: '고대의 존재', tile: 'icon', items: ancients },
+    { id: 'ancients', name: '고대의 존재', tile: 'icon', groupLabel: '막', groups: ANCIENT_ACTS, items: ancients },
   ];
 }
 
@@ -283,11 +380,15 @@ async function main() {
   const categories = [
     characters,
     await cards(),
+    await curses(),
     await relics(),
     await potions(),
-    await bossCategory(),
-    await eliteCategory(),
+    await enchantmentCategory(),
     ancients,
+    await eventCategory(),
+    await monsterCategory(),
+    await eliteCategory(),
+    await bossCategory(),
   ];
 
   if (WITH_IMAGES) await runImageJobs();
@@ -300,6 +401,9 @@ async function main() {
       for (const key of ['img', 'icon']) {
         if (item[key] && failed.has(join(ROOT, 'site', item[key]))) delete item[key];
         if (item[key] === null || item[key] === undefined) delete item[key];
+      }
+      for (const key of Object.keys(item)) {
+        if (item[key] === undefined) delete item[key];
       }
     }
     cat.items.sort((a, b) => a.name.localeCompare(b.name, 'en'));

@@ -1,8 +1,9 @@
 // 미배치 영역 필터: 검색어, 그룹(캐릭터), 희귀도, 종류.
 
-import { h, rarityKo, typeKo } from './ui.js';
+import { h } from './ui.js';
+import { rarityKo, typeKo } from './data.js';
 
-const RARITY_ORDER = ['basic', 'starter', 'common', 'uncommon', 'rare', 'shop', 'event', 'boss', 'ancient', 'special', 'status', 'curse'];
+const RARITY_ORDER = ['basic', 'starter', 'common', 'uncommon', 'rare', 'shop', 'event', 'ancient', 'special', 'boss', 'status', 'curse'];
 
 function uniq(values, order) {
   const set = [...new Set(values.filter(Boolean))];
@@ -10,7 +11,7 @@ function uniq(values, order) {
 }
 
 export function poolControls(template, filter, onChange) {
-  const groups = template.group ? [] : template.category.groups.filter(g => template.items.some(i => i.group === g.id));
+  const groups = template.category.groups.filter(g => template.items.some(i => i.group === g.id));
   const rarities = uniq(template.items.map(i => i.rarity), RARITY_ORDER);
   const types = uniq(template.items.map(i => i.type));
 
@@ -28,7 +29,7 @@ export function poolControls(template, filter, onChange) {
       'aria-label': '이름 검색',
       oninput: e => { filter.q = e.target.value; onChange(); },
     }),
-    select('group', '캐릭터', groups.map(g => [g.id, g.name])),
+    select('group', template.category.groupLabel || '캐릭터', groups.map(g => [g.id, g.name])),
     select('rarity', '희귀도', rarities.map(r => [r, rarityKo(r)])),
     select('type', '종류', types.map(t => [t, typeKo(t)])),
   );

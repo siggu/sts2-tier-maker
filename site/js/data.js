@@ -1,14 +1,34 @@
 // 게임 데이터 로딩과 템플릿 구성.
-// data/sts2.json 은 tools/sts2/fetch-data.mjs 가 위키에서 수집해 만든다.
+// data/sts2.json 은 tools/fetch-data.mjs 가 위키에서 수집해 만든다.
 //
 // {
-//   version, fetchedAt, source,
+//   fetchedAt, source,
 //   categories: [
-//     { id, name, tile: 'card' | 'icon' | 'portrait',
+//     { id, name, tile: 'card' | 'icon' | 'portrait' | 'creature',
 //       groups?: [{ id, name, color }],
+//       split?: { by: ['rarity', 'type'], groupFirst?: bool, sharedGroup?: id },
 //       items: [{ id, name, img, group?, rarity?, type?, cost?, text? }] }
 //   ]
 // }
+
+// 한 번에 티어를 매기기에 적당한 최대 개수. 넘으면 희귀도·종류 등으로 쪼갠다.
+export const TEMPLATE_LIMIT = 70;
+
+export const RARITY_KO = {
+  basic: '기본', starter: '시작', common: '일반', uncommon: '고급', rare: '희귀',
+  shop: '상점', event: '이벤트', ancient: '고대', special: '특수', boss: '보스', curse: '저주', status: '상태이상',
+};
+export const TYPE_KO = { attack: '공격', skill: '스킬', power: '파워', status: '상태이상', curse: '저주', quest: '퀘스트' };
+const FACET_KO = { rarity: '희귀도', type: '종류', group: '캐릭터' };
+const ORDER = {
+  rarity: Object.keys(RARITY_KO),
+  type: Object.keys(TYPE_KO),
+};
+
+export const rarityKo = r => RARITY_KO[r] || r;
+export const typeKo = t => TYPE_KO[t] || t;
+export const facetLabel = (facet, value) => (facet === 'rarity' ? rarityKo(value) : facet === 'type' ? typeKo(value) : value);
+export const facetName = facet => FACET_KO[facet] || facet;
 
 let loading = null;
 
@@ -32,36 +52,72 @@ function buildIndex(raw) {
     return { ...cat, groups, items, byId: new Map(items.map(i => [i.id, i])) };
   });
 
-  // 템플릿: 그룹이 있는 카테고리는 '전체' + 그룹별로 나눈다.
-  const templates = [];
-  for (const cat of categories) {
-    if (!cat.groups.length) {
-      templates.push(makeTemplate(cat, null));
-      continue;
-    }
-    if (!cat.splitOnly) templates.push(makeTemplate(cat, null));
-    for (const g of cat.groups) {
-      if (cat.items.some(i => i.group === g.id)) templates.push(makeTemplate(cat, g));
-    }
-  }
+  const templates = categories.flatMap(buildTemplates);
+  const byId = new Map(templates.map(t => [t.id, t]));
 
   return {
-    version: raw.version,
     fetchedAt: raw.fetchedAt,
     source: raw.source,
     categories,
     templates,
-    template: id => templates.find(t => t.id === id),
+    template: id => byId.get(id),
   };
 }
 
-function makeTemplate(cat, group) {
-  const items = group ? cat.items.filter(i => i.group === group.id) : cat.items;
+function facetValues(items, facet) {
+  const values = [...new Set(items.map(i => i[facet]).filter(Boolean))];
+  const order = ORDER[facet] || [];
+  return values.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+}
+
+// 카테고리 하나에서 티어를 매길 수 있는 묶음(템플릿)들을 만든다.
+//  - 전체가 TEMPLATE_LIMIT 이하면 '전체' 템플릿
+//  - groupFirst(카드): 캐릭터별 → 너무 많으면 캐릭터 × 희귀도, 캐릭터 × 종류
+//  - 그 외(유물·포션·적 등): split.by 로 나눈 묶음 + 공용이 아닌 그룹(캐릭터 전용·막)별
+function buildTemplates(cat) {
+  const out = [];
+  const by = cat.split?.by || [];
+  const add = (parts, items, section) => {
+    if (items.length < 2) return;
+    const id = [cat.id, ...parts.map(p => (p.facet === 'group' ? p.value : `${p.facet}-${p.value}`))].join('.');
+    out.push(makeTemplate(cat, id, parts, items, section));
+  };
+  const group = g => ({ facet: 'group', value: g.id, label: g.name, color: g.color });
+  const facet = (f, v) => ({ facet: f, value: v, label: facetLabel(f, v) });
+
+  if (cat.items.length <= TEMPLATE_LIMIT) add([], cat.items, 'all');
+
+  if (cat.split?.groupFirst) {
+    for (const g of cat.groups) {
+      const gi = cat.items.filter(i => i.group === g.id);
+      if (gi.length <= TEMPLATE_LIMIT) { add([group(g)], gi, g.id); continue; }
+      for (const f of by) {
+        for (const v of facetValues(gi, f)) add([group(g), facet(f, v)], gi.filter(i => i[f] === v), g.id);
+      }
+    }
+    return out;
+  }
+
+  for (const f of by) {
+    for (const v of facetValues(cat.items, f)) add([facet(f, v)], cat.items.filter(i => i[f] === v), f);
+  }
+  for (const g of cat.groups) {
+    if (g.id === cat.split?.sharedGroup) continue;
+    const gi = cat.items.filter(i => i.group === g.id);
+    if (gi.length <= TEMPLATE_LIMIT) add([group(g)], gi, 'group');
+  }
+  return out;
+}
+
+function makeTemplate(cat, id, parts, items, section) {
   return {
-    id: group ? `${cat.id}.${group.id}` : cat.id,
+    id,
     category: cat,
-    group,
-    title: group ? `${cat.name} · ${group.name}` : cat.name,
+    parts,
+    section,
+    group: parts.find(p => p.facet === 'group') || null,
+    label: parts.length ? parts[parts.length - 1].label : '전체',
+    title: [cat.name, ...parts.map(p => p.label)].join(' · '),
     tile: cat.tile,
     items,
     byId: new Map(items.map(i => [i.id, i])),

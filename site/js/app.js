@@ -65,25 +65,54 @@ function viewHome(mode) {
   const sections = db.categories.map(cat => {
     const templates = db.templates.filter(t => t.category.id === cat.id);
     const preview = cat.items.filter(i => i.img).slice(0, 6);
-    return h('section', { class: 'cat' },
+
+    const chip = t => {
+      const summary = isTier ? savedSummary(t) : balanceSummary(t);
+      const color = t.group?.color;
+      return h('a', {
+        class: `tpl${summary ? ' started' : ''}`,
+        href: isTier ? `#/tier/${t.id}` : `#/balance/${t.id}`,
+        style: color ? { '--accent': color } : null,
+        title: t.title,
+      },
+        h('span', { class: 'tpl-name' }, t.parts.length && t.section === t.group?.value && t.parts.length === 1 ? '전체' : t.label),
+        h('span', { class: 'tpl-meta' }, summary ? `${summary.placed}/${t.items.length}` : t.items.length),
+      );
+    };
+
+    // section 별로 줄을 나눈다: 'all', 그룹 id(카드), 'rarity', 'type', 'group'
+    const sectionOrder = [];
+    const bySection = new Map();
+    for (const t of templates) {
+      if (!bySection.has(t.section)) { bySection.set(t.section, []); sectionOrder.push(t.section); }
+      bySection.get(t.section).push(t);
+    }
+    const sectionLabel = sec => {
+      if (sec === 'all') return null;
+      if (sec === 'rarity') return '희귀도별';
+      if (sec === 'type') return '종류별';
+      if (sec === 'group') return `${cat.groupLabel || '캐릭터'}별`;
+      return cat.groups.find(g => g.id === sec)?.name || sec;
+    };
+    const sectionColor = sec => cat.groups.find(g => g.id === sec)?.color;
+
+    const rows = sectionOrder.map(sec => {
+      const label = sectionLabel(sec);
+      return h('div', { class: 'tpl-row' },
+        label && h('span', { class: 'tpl-row-label', style: sectionColor(sec) ? { '--accent': sectionColor(sec) } : null }, label),
+        h('div', { class: 'tpl-list' }, bySection.get(sec).map(chip)),
+      );
+    });
+
+    return h('section', { class: `cat${templates.length > 8 ? ' wide' : ''}` },
       h('div', { class: 'cat-head' },
         h('div', { class: `cat-preview tile-${cat.tile}` }, preview.map(i => h('img', { src: i.img, alt: '', loading: 'lazy' }))),
         h('div', {},
           h('h2', {}, cat.name),
-          h('p', { class: 'muted' }, `${cat.items.length}개`),
+          h('p', { class: 'muted' }, `${cat.items.length}개`, templates.length > 1 ? ` · 묶음 ${templates.length}개` : ''),
         ),
       ),
-      h('div', { class: 'tpl-list' }, templates.map(t => {
-        const summary = isTier ? savedSummary(t) : balanceSummary(t);
-        return h('a', {
-          class: 'tpl',
-          href: isTier ? `#/tier/${t.id}` : `#/balance/${t.id}`,
-          style: t.group?.color ? { '--accent': t.group.color } : null,
-        },
-          h('span', { class: 'tpl-name' }, t.group ? t.group.name : '전체'),
-          h('span', { class: 'tpl-meta' }, summary ? `${summary.placed} / ${t.items.length}` : `${t.items.length}`),
-        );
-      })),
+      h('div', { class: 'tpl-rows' }, rows),
     );
   });
 
