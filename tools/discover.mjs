@@ -1,4 +1,4 @@
-// 위키 구조 탐색용: StS2 관련 모듈/페이지 목록과 원문을 out 디렉터리에 저장한다.
+// 위키 구조 탐색용 (2단계): StS2 이미지 파일 목록과 샘플 이미지를 out 디렉터리에 저장한다.
 // 사용: node tools/discover.mjs <out-dir>
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,57 +7,43 @@ const OUT = process.argv[2] || 'raw';
 const API = 'https://slaythespire.wiki.gg/api.php';
 const UA = 'sts2-tier-maker/0.1 (https://github.com/siggu/sts2-tier-maker)';
 
-async function get(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA } });
-  const text = await res.text();
-  return { status: res.status, text };
-}
-
 async function api(params) {
   const qs = new URLSearchParams({ format: 'json', formatversion: '2', ...params });
-  const { status, text } = await get(`${API}?${qs}`);
-  if (status !== 200) throw new Error(`${status} ${text.slice(0, 200)}`);
-  return JSON.parse(text);
+  const res = await fetch(`${API}?${qs}`, { headers: { 'User-Agent': UA } });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
 }
 
-async function allPages(ns) {
-  const titles = [];
+await mkdir(join(OUT, 'samples'), { recursive: true });
+
+// StS2 로 시작하는 모든 파일
+const files = [];
+for (const prefix of ['StS2', 'Sts2', 'STS2']) {
   let cont = {};
-  for (let i = 0; i < 40; i++) {
-    const r = await api({ action: 'query', list: 'allpages', apnamespace: String(ns), aplimit: 'max', ...cont });
-    titles.push(...r.query.allpages.map(p => p.title));
+  for (let i = 0; i < 60; i++) {
+    const r = await api({ action: 'query', list: 'allimages', aiprefix: prefix, ailimit: 'max', aiprop: 'size|url|mime', ...cont });
+    files.push(...r.query.allimages.map(f => [f.name, f.width, f.height, f.size, f.url].join('\t')));
     if (!r.continue) break;
     cont = r.continue;
   }
-  return titles;
+}
+await writeFile(join(OUT, 'files.tsv'), files.join('\n'));
+
+// 캐릭터 페이지 위키텍스트 (초상화 파일명 확인용)
+for (const t of ['Ironclad', 'Silent', 'Regent', 'Necrobinder', 'Defect', 'Neow', 'Ceremonial Beast', 'Slay the Spire 2']) {
+  const res = await fetch(`https://slaythespire.wiki.gg/index.php?title=${encodeURIComponent(t)}&action=raw`, { headers: { 'User-Agent': UA } });
+  if (res.ok) await writeFile(join(OUT, `page_${t.replace(/\W+/g, '_')}.wiki`), await res.text());
 }
 
-await mkdir(join(OUT, 'modules'), { recursive: true });
-const log = [];
-
-const namespaces = await api({ action: 'query', meta: 'siteinfo', siprop: 'namespaces|general' });
-await writeFile(join(OUT, 'siteinfo.json'), JSON.stringify(namespaces, null, 1));
-
-const modules = await allPages(828);
-await writeFile(join(OUT, 'modules.txt'), modules.join('\n'));
-const mainPages = await allPages(0);
-await writeFile(join(OUT, 'pages.txt'), mainPages.join('\n'));
-const categories = await allPages(14);
-await writeFile(join(OUT, 'categories.txt'), categories.join('\n'));
-log.push(`modules=${modules.length} pages=${mainPages.length} categories=${categories.length}`);
-
-for (const title of modules.filter(t => /sts2|slay the spire 2/i.test(t))) {
-  const { status, text } = await get(`https://slaythespire.wiki.gg/index.php?title=${encodeURIComponent(title)}&action=raw`);
-  log.push(`${status} ${title} ${text.length}`);
-  await writeFile(join(OUT, 'modules', title.replace(/[^\w.-]+/g, '_') + '.lua'), text);
+const samples = [
+  'StS2_Ironclad-Bash.png', 'StS2_Regent-Strike.png', 'StS2_BurningBlood.png', 'StS2_Anchor.png', 'StS2_AttackPotion.png',
+  'StS2_Ceremonial Beast.png', 'StS2 Icon CeremonialBeastBoss.png', 'StS2_IconIronclad.png', 'StS2_IconNeow.png', 'StS2_Byrdonis.png',
+];
+const log = [`files=${files.length}`];
+for (const name of samples) {
+  const res = await fetch(`https://slaythespire.wiki.gg/wiki/Special:FilePath/${encodeURIComponent(name)}`, { headers: { 'User-Agent': UA } });
+  log.push(`${res.status} ${name} ${res.headers.get('content-type')}`);
+  if (res.ok) await writeFile(join(OUT, 'samples', name.replace(/\s+/g, '_')), Buffer.from(await res.arrayBuffer()));
 }
-
-// 대표 페이지 몇 개의 위키텍스트
-for (const title of ['Slay the Spire 2', 'Relics List', 'Slay the Spire 2:Cards', 'Cards (Slay the Spire 2)']) {
-  const { status, text } = await get(`https://slaythespire.wiki.gg/index.php?title=${encodeURIComponent(title)}&action=raw`);
-  log.push(`${status} page ${title} ${text.length}`);
-  if (status === 200) await writeFile(join(OUT, 'page_' + title.replace(/[^\w.-]+/g, '_') + '.wiki'), text);
-}
-
 await writeFile(join(OUT, 'log.txt'), log.join('\n'));
 console.log(log.join('\n'));
