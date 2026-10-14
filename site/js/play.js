@@ -539,7 +539,7 @@ function viewVersus(catId, params, ctx) {
         onclick: () => choose(i),
       },
         h('span', { class: `vs-media kind-${cat.tile}` },
-          item.img ? h('img', { src: item.img, alt: '', decoding: 'async', draggable: 'false' }) : h('span', { class: 'vs-noimg' }, item.name)),
+          item.img ? h('img', { src: item.img, alt: '', decoding: 'async', draggable: 'false' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, '?')),
         h('span', { class: 'vs-name' }, item.name),
         meta && h('span', { class: 'vs-meta' }, meta),
         text,

@@ -92,7 +92,10 @@
   transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.vs-pick:hover { border-color: var(--side); transform: translateY(-2px); box-shadow: 0 0 0 1px var(--side), 0 14px 32px rgba(0, 0, 0, .45); }
+@media (hover: hover) {
+  .vs-pick:hover { border-color: var(--side); transform: translateY(-2px); box-shadow: 0 0 0 1px var(--side), 0 14px 32px rgba(0, 0, 0, .45); }
+}
+.vs-pick:focus-visible { border-color: var(--side); }
 .vs-pick:active { transform: scale(.98); }
 .vs-media { width: 100%; display: grid; place-items: center; height: 280px; }
 .vs-media img { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .6)); pointer-events: none; }
@@ -101,9 +104,11 @@
 .vs-pair.kind-icon .vs-media img { width: 112px; height: 112px; }
 .vs-pair.kind-creature .vs-media, .vs-pair.kind-portrait .vs-media { height: clamp(180px, 32vh, 260px); }
 .vs-noimg {
-  width: min(180px, 100%); aspect-ratio: 3 / 4; display: grid; place-items: center; padding: 10px;
-  border-radius: 10px; background: #2b2f38; font-family: var(--font-game); font-size: 17px;
+  width: min(180px, 100%); height: 100%; display: grid; place-items: center;
+  border-radius: 10px; background: linear-gradient(180deg, #2b2f38, #1c1f26); border: 1px solid rgba(255, 255, 255, .12);
+  font-family: var(--font-game); font-size: 34px; color: var(--muted);
 }
+.vs-pair.kind-icon .vs-noimg { width: 112px; height: 112px; }
 .vs-name { font-family: var(--font-game); font-weight: 700; font-size: 20px; line-height: 1.2; color: var(--gold-hi); overflow-wrap: anywhere; }
 .vs-meta { font-size: 12.5px; color: var(--muted); }
 .vs-pick .tip-text { width: 100%; margin-top: 2px; text-align: left; font-size: 13.5px; }
@@ -187,6 +192,8 @@
   .vs-pair.kind-icon .vs-media img { width: 84px; height: 84px; }
   .vs-pair.kind-creature .vs-media, .vs-pair.kind-portrait .vs-media { height: 170px; }
   .vs-name { font-size: 16px; }
+  .vs-key { display: none; }
+  .vs-pair.kind-icon .vs-noimg { width: 84px; height: 84px; }
   .vs-pick .tip-text { font-size: 12.5px; line-height: 1.45; }
   .vs-skip { width: 100%; }
   .vs-rank-row { gap: 8px; padding: 6px 10px 6px 4px; }

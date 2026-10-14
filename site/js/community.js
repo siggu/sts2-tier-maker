@@ -797,6 +797,7 @@ function commentsSection({ listPath, postPath, verdicts = null, sortable = false
           h('div', { class: 'cmt-meta' },
             h('b', { class: 'cmt-name' }, c.author?.name || '?'),
             mine && h('span', { class: 'cmt-me' }, t('comments.me')),
+            c.hidden && h('span', { class: 'gal-hidden-badge' }, t('gallery.hiddenBadge')),
             v && h('span', { class: 'cmt-vote', style: { '--v': v.color }, title: t('comments.voteTitle', { v: v.label, sub: v.sub }) }, h('i', { 'aria-hidden': 'true' }), v.label),
             timeEl(c.created)),
           deleted ? h('p', { class: 'cmt-body cmt-removed' }, t('comments.deleted')) : h('p', { class: 'cmt-body' }, c.body),
@@ -805,7 +806,7 @@ function commentsSection({ listPath, postPath, verdicts = null, sortable = false
               type: 'button', class: `cmt-like${c.myLike ? ' on' : ''}`, 'aria-pressed': String(Boolean(c.myLike)),
               'aria-label': t('comments.likeAria', { n: c.likes || 0 }), onclick: () => like(c, draw),
             }, icon('heart'), h('span', {}, String(c.likes || 0))),
-            (mine || currentUser()?.admin) && h('button', { type: 'button', class: 'cmt-act', onclick: () => remove(c, draw) }, icon('trash'), t('acct.delete')),
+            (mine || currentUser()?.admin) && h('button', { type: 'button', class: 'cmt-act', onclick: () => remove(c) }, icon('trash'), t('acct.delete')),
             !mine && h('button', { type: 'button', class: 'cmt-act', onclick: () => reportDialog('comment', c.id) }, icon('flag'), t('acct.report')),
           ),
         ),
@@ -838,13 +839,13 @@ function commentsSection({ listPath, postPath, verdicts = null, sortable = false
     redraw();
   }
 
-  async function remove(c, redraw) {
+  async function remove(c) {
     if (!confirm(t('comments.deleteConfirm'))) return;
     try {
       await api(`/comments/${enc(c.id)}`, { method: 'DELETE' });
-      c.deleted = true;
-      c.body = '';
-      redraw();
+      // 지운 댓글은 목록에서 빠진다
+      comments = comments.filter(x => x !== c);
+      drawList();
       setCount();
     } catch (err) { toast(errorText(err)); }
   }
