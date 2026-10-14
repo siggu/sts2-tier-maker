@@ -2,6 +2,8 @@ name: 위키 구조 탐색 (임시)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [discover]
 
 permissions:
   contents: write
