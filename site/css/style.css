@@ -673,3 +673,27 @@ body.modal-open { overflow: hidden; }
 /* 줄 높이는 타일 크기에 맞춘다 (아이콘 묶음이 카드 높이만큼 비어 보이지 않게) */
 .board.kind-icon .row { min-height: calc(var(--icon) + 12px); }
 .board.kind-creature .row { min-height: calc(var(--creature-h) + 12px); }
+
+/* ================================================================ 글자 줄바꿈·잘림 */
+.brand span, .topnav a, .btn, .crumbs a, .crumbs span, .tpl-card-meta, .cat-card-meta span, .board-progress span { white-space: nowrap; }
+.row-label-text { word-break: keep-all; overflow-wrap: anywhere; }
+.row-label-sub { word-break: keep-all; line-height: 1.2; }
+.tile-name { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: anywhere; }
+.detail-title, .result-name, .tip-title { overflow-wrap: anywhere; }
+.filters select { padding-right: 26px; }
+
+@media (max-width: 420px) {
+  /* 좁은 화면: 로고 글자는 숨기고 아이콘만, 탭은 한 줄로 */
+  .brand span { display: none; }
+  .topbar { padding: 8px 12px; }
+  .topnav { gap: 2px; }
+  .topnav a { padding: 6px 12px; font-size: 13.5px; }
+}
+@media (max-width: 640px) {
+  /* 밸런스 줄 이름(너프 필요/너무 어려움)이 단어 중간에서 끊기지 않게 */
+  .board .row-label { flex-basis: 76px; padding: 6px 4px; }
+  .board .row-label-sub + .row-label-text, .row-label-text:not(:only-child) { font-size: 14px; white-space: nowrap; }
+  .row-label-sub { font-size: 10.5px; white-space: nowrap; }
+  .board-h1 { font-size: 21px; }
+  .crumbs { font-size: 12.5px; }
+}

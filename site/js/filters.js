@@ -18,7 +18,8 @@ export function poolControls(template, filter, onChange) {
   const select = (key, label, options) => options.length > 1 && h('label', { class: 'filter-select' },
     h('span', { class: 'sr-only' }, label),
     h('select', { onchange: e => { filter[key] = e.target.value; onChange(); } },
-      h('option', { value: '' }, `${label}: 전체`),
+      // 기본값은 이름만 보여 줘서 좁은 화면에서도 잘리지 않게 한다 (예: '희귀도 ▾')
+      h('option', { value: '' }, label),
       options.map(([v, text]) => h('option', { value: v, selected: filter[key] === v }, text)),
     ),
   );
