@@ -38,8 +38,13 @@ for (const lang of LANGS) {
   try { L10N[lang] = JSON.parse(await readFile(join(ROOT, 'tools', 'l10n', `${lang}.json`), 'utf8')); } catch { /* 이 언어 파일 없음 */ }
 }
 const ACTIVE = Object.keys(L10N);
-const lc = s => String(s).trim().toLowerCase();
-const entryOf = (lang, table, en) => L10N[lang]?.[table]?.[lc(en)];
+// 찾기용 키: 소문자, 굽은 따옴표 → 곧은 따옴표 (build-l10n.mjs 의 lower 와 같게)
+const lc = s => String(s).trim().toLowerCase().replace(/[‘’]/g, "'");
+// 위키 이름 그대로 → 'The ' 를 뗀 이름 순으로 찾는다 ('The Lost and Forgotten' ↔ 게임 'Lost and Forgotten')
+const entryOf = (lang, table, en) => {
+  const t = L10N[lang]?.[table];
+  return t?.[lc(en)] ?? t?.[lc(String(en).trim().replace(/^the /i, ''))];
+};
 const nameOf = (lang, table, en) => { const v = entryOf(lang, table, en); return typeof v === 'string' ? v : v?.name; };
 // 효과 문구 속 이름 값(예: 인챈트 이름)을 옮길 때 쓰는 영어 → 번역 표
 const WORDS = Object.fromEntries(ACTIVE.map(lang => [lang, Object.fromEntries(['cards', 'relics', 'potions', 'enchantments']
@@ -53,6 +58,8 @@ const SHARED_NAMES = {
   'zh-Hans': { shared: '通用', colorless: '无色' },
   'zh-Hant': { shared: '通用', colorless: '無色' },
 };
+// 위키의 'Test Subject (Phase 2)' 같은 단계 표시
+const PHASE = { ko: n => `${n}페이즈`, ja: n => `第${n}形態`, 'zh-Hans': n => `第${n}阶段`, 'zh-Hant': n => `第${n}階段` };
 const APPEARS = { en: 'Appears: ', ko: '등장: ', ja: '登場: ', 'zh-Hans': '出现：', 'zh-Hant': '出現：' };
 const LIST_SEP = { en: ', ', ko: ', ', ja: '、', 'zh-Hans': '、', 'zh-Hant': '、' };
 const actLabel = (lang, n) => (lang === 'en' ? `Act ${n}` : (L10N[lang]?.terms?.actNumber || 'Act {actNumber}').replace('{actNumber}', n));
@@ -76,7 +83,14 @@ function localize(lang, table, enName, wikiText, { keywords = false, upgradable 
   if (!e) return null;
   stats[lang].name++;
   const out = { name: e.name };
-  if (e.en && e.tr && wikiText) {
+  if (!e.en && keywords && wikiText) {
+    // 게임 효과 문구가 비어 있고 위키 문구가 키워드뿐인 카드(저주 등): 키워드 이름만 옮긴다
+    const split = splitKeywords(wikiText);
+    if (split.keywords.length && !split.text.replace(/<br\s*\/?>/gi, '').trim()) {
+      out.text = withKeywords('', split.keywords, L10N[lang].keywords, false, false);
+      stats[lang].text++;
+    }
+  } else if (e.en && e.tr && wikiText) {
     const split = keywords ? splitKeywords(wikiText) : { text: wikiText, keywords: [] };
     const vals = alignValues(e.en, split.text);
     if (vals) {
@@ -469,15 +483,30 @@ function enemyItems(data, type, folder, fallbackArea) {
       e.members.length > 1 && e.members.map(m => memberName(m.name)).join(', '),
     ].filter(Boolean).join('\n'));
     for (const lang of ACTIVE) {
-      const memberName = n => nameOf(lang, 'monsters', n) || n;
+      // 몬스터 이름 → 없으면 전투 이름(Knight Gang) → 'Test Subject (Phase 2)' 는 단계 표시를 옮긴다
+      const memberName = n => {
+        const found = nameOf(lang, 'monsters', n) || nameOf(lang, 'encounters', n);
+        if (found) return found;
+        const phase = n.match(/^(.*\S)\s*\(Phase (\d+)\)$/);
+        const base = phase && (nameOf(lang, 'monsters', phase[1]) || nameOf(lang, 'encounters', phase[1]));
+        return base ? `${base} (${PHASE[lang]?.(phase[2]) ?? `Phase ${phase[2]}`})` : n;
+      };
       const moves = L10N[lang].moves || {};
+      // 'Slash2' 처럼 같은 이름 기술을 숫자로 구분한 위키 이름은 숫자를 떼고 찾는다
+      const moveName = (m, x) => {
+        for (const mv of [lc(x.Name), lc(x.Name).replace(/\s*\d+$/, '')]) {
+          const hit = moves[`${lc(m.name)}|${mv}`] || moves[`*|${mv}`];
+          if (hit) return hit;
+        }
+        return String(x.Name);
+      };
       put(lang, `${folder}/${id}`, {
-        name: nameOf(lang, 'encounters', e.name) || nameOf(lang, 'monsters', e.name),
+        name: nameOf(lang, 'encounters', e.name) || nameOf(lang, 'monsters', e.name) || nameOf(lang, 'encounterIds', e.name),
         text: describe(area && areaName(lang, area), memberName),
         area: area && areaName(lang, area),
         members: e.members.map(m => ({
           name: memberName(m.name),
-          moves: intents(m).map(x => moves[`${lc(m.name)}|${lc(x.Name)}`] || moves[`*|${lc(x.Name)}`] || String(x.Name)),
+          moves: intents(m).map(x => moveName(m, x)),
         })),
       });
     }

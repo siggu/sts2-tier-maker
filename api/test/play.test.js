@@ -79,3 +79,51 @@ test('Elo 변화', () => {
   assert.ok(Math.abs(strongWins + weakWins - ELO_K) < 1e-9);
   assert.ok(Math.abs(eloDelta(1900, 1500) - 24 / 11) < 1e-9); // 400점 차 → 기대 승률 10/11
 });
+
+// ---- 실제 Worker 에 대고 돌리는 시험 (선택) ----
+// cd api && npx wrangler d1 migrations apply sts2-balance --local && npx wrangler dev --local --port 8799
+// PLAY_E2E_URL=http://127.0.0.1:8799 npm test
+const E2E = process.env.PLAY_E2E_URL;
+
+test('e2e: A vs B 투표·재투표·순위·속도 제한', { skip: !E2E && 'PLAY_E2E_URL 없음' }, async () => {
+  const ip = `10.${Math.random() * 255 | 0}.${Math.random() * 255 | 0}.${Math.random() * 255 | 0}`;
+  const post = async body => {
+    const res = await fetch(`${E2E}/versus`, { method: 'POST', headers: { 'CF-Connecting-IP': ip }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+  const health = await fetch(`${E2E}/health`).then(r => r.json());
+  assert.ok(health.ok);
+  // 다른 시험과 겹치지 않게 아직 표가 없는 포션 쌍을 고른다 (순위는 30초 캐시라 연달아 돌리면 겹칠 수 있다).
+  const { items } = await fetch(`${E2E}/versus/ranking?category=potions`).then(r => r.json());
+  const keysJson = (await import('node:fs')).readFileSync(new URL('../../site/data/keys.json', import.meta.url), 'utf8');
+  const fresh = JSON.parse(keysJson).filter(k => k.startsWith('potions/')).map(k => k.slice(8)).filter(id => !items[id]);
+  if (fresh.length < 2) return; // 이미 다 써 버린 로컬 DB
+  const [x, y] = fresh;
+  const me = `e2e${Date.now()}`;
+
+  let r = await post({ category: 'potions', winner: x, loser: y, voter: me });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { ok: true, ratings: { [x]: 1512, [y]: 1488 } });
+  r = await post({ category: 'potions', winner: x, loser: y, voter: me }); // 같은 선택 → 그대로
+  assert.deepEqual(r.body.ratings, { [x]: 1512, [y]: 1488 });
+  r = await post({ category: 'potions', winner: y, loser: x, voter: me }); // 뒤집기 → 새 결과만 반영
+  const d = eloDelta(1488, 1512); // 약한 쪽이 이겨서 12 보다 많이 움직인다
+  assert.deepEqual(r.body.ratings, { [x]: Math.round((1512 - d) * 10) / 10, [y]: Math.round((1488 + d) * 10) / 10 });
+
+  assert.deepEqual((await post({ category: 'potions', winner: x, loser: x, voter: me })).body, { error: 'bad_request', reason: 'same' });
+  assert.deepEqual((await post({ category: 'potions', winner: x, loser: y, voter: 'u_12345678' })).body, { error: 'bad_request', reason: 'voter' });
+  assert.equal((await fetch(`${E2E}/versus`)).status, 405);
+  assert.equal((await fetch(`${E2E}/versus/ranking?category=nope`)).status, 400);
+  assert.equal((await fetch(`${E2E}/tiers/aggregate?template=nope.x`)).status, 400);
+  const agg = await fetch(`${E2E}/tiers/aggregate?template=potions`).then(r => r.json());
+  assert.equal(agg.template, 'potions');
+  assert.equal(typeof agg.count, 'number');
+
+  // 이 IP 로 이미 3번 성공 → 57번 더 되고 그다음부터 429 (분이 바뀌어도 128번이면 한 분에 60번을 넘는다)
+  const minute = () => Math.floor(Date.now() / 60000);
+  const start = minute();
+  const codes = [];
+  for (let i = 0; i < 125; i++) codes.push((await post({ category: 'potions', winner: x, loser: y, voter: `${me}r${i}` })).status);
+  assert.ok(codes.includes(429));
+  if (minute() === start) assert.equal(codes.filter(c => c === 200).length, 57);
+});

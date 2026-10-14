@@ -11,6 +11,7 @@ import { renderPng } from './export.js';
 import { openDetail, closeDetail } from './detail.js';
 import { verdictsFor, loadMine, saveMine, loadSubmitted, unsubmittedChanges, submitChanges, onSyncStatus, fetchResults, flush } from './balance.js';
 import * as community from './community.js';
+import { currentUser } from './auth.js';
 import * as play from './play.js';
 
 const app = document.getElementById('app');
@@ -900,7 +901,7 @@ async function viewMyVotes() {
       crumbs('balance', [t('balance.mine')]),
       h('header', { class: 'page-head' },
         h('h1', {}, t('balance.mine')),
-        h('p', {}, t('my.lead')),
+        h('p', {}, t(currentUser() ? 'acct.my.lead' : 'my.lead')),
       ),
       h('div', { class: 'my-summary' },
         h('div', { class: 'my-stat' }, h('strong', {}, String(total)), h('span', {}, t('my.submitted'))),
@@ -912,7 +913,7 @@ async function viewMyVotes() {
         VERDICTS.map(v => h('button', { class: filter === v.v ? 'on' : null, onclick: () => { filter = v.v; draw(); } }, v.label)),
       ),
       sections,
-      h('p', { class: 'help' }, t('my.localOnly')),
+      h('p', { class: 'help' }, t(currentUser() ? 'acct.my.synced' : 'my.localOnly')),
     );
   }
 

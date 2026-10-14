@@ -26,7 +26,6 @@ CREATE TABLE user_tiers (
   updated_at  INTEGER NOT NULL,
   PRIMARY KEY (user_id, template)
 );
-CREATE INDEX user_tiers_template ON user_tiers (template);
 
 CREATE TABLE posts (
   id          TEXT    PRIMARY KEY,

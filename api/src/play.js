@@ -2,6 +2,7 @@
 // 처리하는 경로면 Response, 아니면 null 을 돌려준다.
 import { json, ipHashOf, rateLimited, readJson } from './http.js';
 import { getUser } from './auth.js';
+import { isAnonVoter } from './votes.js';
 
 const AGGREGATE_TTL = 60;
 const RANKING_TTL = 30;
@@ -12,7 +13,6 @@ export const ELO_K = 24;
 
 // 형식만 본다. 고대 유물 묶음 id 에 'source-Neow' 처럼 대문자가 들어가므로 첫 글자 뒤로는 대문자도 받는다.
 const TEMPLATE_RE = /^[a-z0-9][A-Za-z0-9.-]{0,79}$/;
-const VOTER_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 export async function handlePlay(request, env, ctx, { url, cors, keys }) {
   const path = url.pathname;
@@ -85,7 +85,7 @@ export function finalizeAggregate(rows, category, keys) {
 }
 
 // body: { category, winner, loser, voter? }. 틀리면 이유, 맞으면 null.
-// 로그인했으면 voter 는 보지 않는다. 익명 voter 는 'u_' 로 시작하면 안 된다(계정 표를 흉내 내지 못하게).
+// 로그인했으면 voter 는 보지 않는다. 익명 voter 는 /balance 와 같은 형식 ('u_' 로 시작하면 안 됨).
 export function validateVersus(body, keys, loggedIn = false) {
   if (!body || typeof body !== 'object') return 'body';
   const { category, winner, loser, voter } = body;
@@ -93,7 +93,7 @@ export function validateVersus(body, keys, loggedIn = false) {
   if (typeof winner !== 'string' || typeof loser !== 'string'
     || !keys.has(`${category}/${winner}`) || !keys.has(`${category}/${loser}`)) return 'item';
   if (winner === loser) return 'same';
-  if (!loggedIn && (typeof voter !== 'string' || !VOTER_RE.test(voter) || voter.startsWith('u_'))) return 'voter';
+  if (!loggedIn && !isAnonVoter(voter)) return 'voter';
   return null;
 }
 
@@ -113,25 +113,31 @@ const round1 = r => Math.round(r * 10) / 10;
 // ---- 모두의 티어표 ----
 
 // 같은 사람은 한 표: 동기화본이 있으면 그것, 없으면 숨김이 아닌 최신 글.
+// 읽는 행 수를 묶기 위해 동기화본은 최신 5000개, 글은 최신 10000개만 색인 순서로 가져온다
+// (user_tiers (template, updated_at) 색인은 0003, posts 는 0002 의 posts_template_new).
 // 점수 계산까지 SQL(json_each) 에서 끝내서 큰 state 를 Worker 로 옮기거나 파싱하지 않는다.
-// json_each 는 깨진 JSON 에서 오류를 내므로 CASE 로 먼저 걸러 준다.
+// json_each/json_type 은 깨진 JSON 에서 오류를 낸다. WHERE 의 AND 는 SQLite 가 순서를 바꿔 평가하므로
+// (json_valid 보다 json_type 이 먼저 돌 수 있다) 반드시 CASE 로 순서를 강제한다.
 const AGGREGATE_SQL = `
 WITH synced AS (
   SELECT user_id, state, updated_at AS t FROM user_tiers WHERE template = ?1
+  ORDER BY updated_at DESC LIMIT ${AGGREGATE_MAX_LISTS}
+),
+recent_posts AS (
+  SELECT user_id, state, created AS t FROM posts WHERE template = ?1 AND hidden = 0
+  ORDER BY created DESC LIMIT ${AGGREGATE_MAX_LISTS * 2}
 ),
 posted AS (
-  SELECT user_id, state, created AS t,
-         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created DESC) AS rn
-  FROM posts WHERE template = ?1 AND hidden = 0
+  SELECT user_id, state, t, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY t DESC) AS rn FROM recent_posts
 ),
 lists AS MATERIALIZED (
   SELECT user_id, state FROM (
     SELECT user_id, state, t FROM synced
     UNION ALL
     SELECT p.user_id, p.state, p.t FROM posted p
-    WHERE p.rn = 1 AND NOT EXISTS (SELECT 1 FROM synced s WHERE s.user_id = p.user_id)
+    WHERE p.rn = 1 AND NOT EXISTS (SELECT 1 FROM user_tiers s WHERE s.user_id = p.user_id AND s.template = ?1)
   )
-  WHERE json_valid(state) AND json_type(state, '$.tiers') = 'array'
+  WHERE CASE WHEN json_valid(state) THEN json_type(state, '$.tiers') = 'array' ELSE 0 END
   ORDER BY t DESC LIMIT ${AGGREGATE_MAX_LISTS}
 ),
 placed AS (
@@ -140,8 +146,8 @@ placed AS (
                   ELSE 1.0 - CAST(t.key AS REAL) / (json_array_length(l.state, '$.tiers') - 1) END) AS score
   FROM lists l
   JOIN json_each(l.state, '$.tiers') t
-  JOIN json_each(CASE WHEN t.type = 'object' AND json_type(t.value, '$.items') = 'array'
-                      THEN t.value ELSE '{}' END, '$.items') it
+  JOIN json_each(CASE WHEN t.type != 'object' THEN '{}'
+                      WHEN json_type(t.value, '$.items') = 'array' THEN t.value ELSE '{}' END, '$.items') it
   WHERE it.type = 'text'
   GROUP BY l.user_id, it.value
 )

@@ -36,8 +36,13 @@ export default {
 async function postVotes(request, env, ctx, cors) {
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad_request', reason: 'json' }, 400, cors); }
-  const reason = validateBody(body);
+  // 로그인 상태면 계정 표('u_' + id)로 낸다. body.voter 는 없어도 되고 IP 당 voter 수 제한도 건너뛴다.
+  const user = await getUser(request, env);
+  const reason = validateBody(body, { voterOptional: Boolean(user) });
+  // 세션이 만료됐는데 voter 없이 보냈다면 다시 로그인하라고 알린다
+  if (reason === 'voter' && request.headers.has('Authorization')) return json({ error: 'auth' }, 401, cors);
   if (reason) return json({ error: 'bad_request', reason }, 400, cors);
+  const voter = user ? `u_${user.id}` : body.voter;
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const ipHash = await sha256(`${env.IP_SALT || 'sts2-balance'}:${ip}`);
@@ -54,8 +59,8 @@ async function postVotes(request, env, ctx, cors) {
   const latest = new Map();
   for (const vote of body.votes) latest.set(vote.item, vote.v);
 
-  // 이 IP 에서 다른 voter 로 이미 표를 낸 수
-  const items = [...latest.keys()];
+  // 이 IP 에서 다른 voter 로 이미 표를 낸 수 (계정 표는 계정당 하나라 세지 않는다)
+  const items = user ? [] : [...latest.keys()];
   const crowded = new Set();
   for (let i = 0; i < items.length; i += 90) {
     const chunk = items.slice(i, i + 90);
@@ -63,7 +68,7 @@ async function postVotes(request, env, ctx, cors) {
     const { results } = await env.DB.prepare(
       `SELECT item, COUNT(*) AS n FROM balance_votes
        WHERE ip_hash = ?1 AND voter != ?2 AND item IN (${placeholders}) GROUP BY item`
-    ).bind(ipHash, body.voter, ...chunk).all();
+    ).bind(ipHash, voter, ...chunk).all();
     for (const r of results) if (r.n >= MAX_VOTERS_PER_IP_ITEM) crowded.add(r.item);
   }
 
@@ -75,9 +80,9 @@ async function postVotes(request, env, ctx, cors) {
   const stmts = [];
   let skipped = 0;
   for (const [item, v] of latest) {
-    if (v === null) stmts.push(del.bind(item, body.voter));
+    if (v === null) stmts.push(del.bind(item, voter));
     else if (crowded.has(item)) skipped++;
-    else stmts.push(upsert.bind(item, body.voter, ipHash, VOTE_VALUES[v], now));
+    else stmts.push(upsert.bind(item, voter, ipHash, VOTE_VALUES[v], now));
   }
   if (stmts.length) await env.DB.batch(stmts);
 

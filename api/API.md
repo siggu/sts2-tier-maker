@@ -7,7 +7,7 @@
 - 로그인이 필요한 요청은 `Authorization: Bearer <세션 토큰>`. 없거나 틀리면 `401 { error: 'auth' }`.
 - 항목 키는 `카테고리/아이템id` (예: `cards/bash`) — `site/data/keys.json` 에 있는 것만 받는다.
 - 묶음(템플릿) id 는 사이트 data.js 가 만드는 것 (예: `cards.ironclad.type-attack`, `potions`, `relics.rarity-ancient.source-Neow`).
-  서버는 형식만 확인한다: `^[a-z0-9][a-z0-9.-]{0,79}$` 이고 첫 마디(`.` 앞)가 알려진 카테고리.
+  서버는 형식만 확인한다: `^[a-z0-9][A-Za-z0-9.-]{0,79}$` (고대의 존재 이름처럼 대문자가 들어갈 수 있다) 이고 첫 마디(`.` 앞)가 알려진 카테고리.
 - 사용자에게 보이는 이름은 `users.name` (구글 이름의 앞부분으로 시작, 본인이 바꿀 수 있음). 이메일은 저장하지도 보여 주지도 않는다.
 
 ## 모듈 나눔

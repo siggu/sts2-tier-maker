@@ -23,6 +23,6 @@ CREATE TABLE versus_ratings (
   PRIMARY KEY (category, item)
 );
 
--- 모두의 티어표 집계가 묶음 하나의 티어표만 훑게 한다 (0002 의 표에 붙이는 색인).
-CREATE INDEX IF NOT EXISTS play_user_tiers_template ON user_tiers (template, user_id);
-CREATE INDEX IF NOT EXISTS play_posts_template ON posts (template, user_id, created);
+-- 모두의 티어표 집계는 묶음별 최신 동기화본부터 정해진 수만 읽는다 (글은 0002 의 posts_template_new).
+-- 색인 없이 updated_at 으로 정렬하면 그 묶음의 모든 행(큰 state 포함)을 다 읽게 된다.
+CREATE INDEX play_user_tiers_recent ON user_tiers (template, updated_at);
