@@ -80,4 +80,5 @@ jobs:
 
       - name: 배포
         if: steps.secrets.outputs.ok == 'true'
-        run: npx wrangler deploy
+        # 처음 만든 Worker 는 업로드 직후 설정 조회가 '없는 Worker'(10007)로 실패할 수 있어 한 번 더 시도한다.
+        run: npx wrangler deploy || { sleep 10; npx wrangler deploy; }
