@@ -370,6 +370,10 @@ body.is-dragging * { cursor: grabbing !important; }
 .result-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .result-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; vertical-align: 1px; }
 .result-legend .n { margin-left: auto; }
+/* 화면이 넓으면 두 칸으로 (순서는 왼쪽 → 오른쪽, 위 → 아래) */
+@media (min-width: 900px) {
+  .result-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .empty { padding: 60px 0; text-align: center; }
 .empty h2 { font-family: var(--font-title); color: var(--gold-hi); }
