@@ -70,7 +70,7 @@ export function slug(name) {
 const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 // 위키 표기 → 툴팁·상세 정보용 HTML
-//   [6|9]      → mode 'both': 6(9), 'base': 강화로 바뀔 6 표시, 'up': 강화 후 9 강조
+//   [6|9]      → mode 'both': 6(9), 'up': 강화 후 값 9 를 강조
 //   $Block     → 키워드 강조
 //   @IE @CE …  → 에너지/별 아이콘 글자
 //   <br>       → 줄바꿈
@@ -87,7 +87,6 @@ export function formatText(raw, mode = 'both') {
     .replace(/'''?/g, '');
   s = escapeHtml(s);
   s = s.replace(/\[([^\[\]|]*)\|([^\[\]|]*)\]/g, (_, a, b) => {
-    if (mode === 'base') return a ? `<span class="chg">${a}</span>` : '';
     if (mode === 'up') return b ? `<span class="up">${b}</span>` : '';
     return `${a}<span class="up">(${b})</span>`;
   });
@@ -267,7 +266,6 @@ function cardItem(name, c, id, group) {
     costUp: upgradable && costUp !== undefined && costUp !== c.Cost ? costUp : undefined,
     stars: c.StarCost ?? undefined,
     text: formatText(c.Text),
-    textBase: upgradable && changed ? formatText(c.Text, 'base') : undefined,
     textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
     img: image(c.Image, 'cards', id, { height: 300 }),
     imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300 }) : undefined,

@@ -1,5 +1,5 @@
-// 항목 상세 정보 창: 큰 이미지, 강화 전/후 효과, 적 행동 패턴, 고대의 존재가 주는 유물.
-// 텍스트 필드(text, textBase, textUp, moves[].text, flavor)는 수집 스크립트가 이스케이프한 뒤 만든 HTML 이다.
+// 항목 상세 정보 창: 큰 이미지(카드는 강화 전/후 토글), 효과, 적 행동 패턴, 고대의 존재가 주는 유물.
+// 텍스트 필드(text, textUp, moves[].text, flavor)는 수집 스크립트가 이스케이프한 뒤 만든 HTML 이다.
 
 import { h } from './ui.js';
 import { rarityKo, typeKo } from './data.js';
@@ -16,21 +16,22 @@ export function openDetail(item, category, db) {
 
   function render() {
     const img = showUp && item.imgUp ? item.imgUp : item.img;
+    const canUpgrade = Boolean(item.imgUp || item.textUp || item.costUp !== undefined);
     panel.replaceChildren(
       h('button', { class: 'detail-close', 'aria-label': '닫기', onclick: closeDetail }, '×'),
       h('div', { class: `detail-media kind-${category.tile}` },
         img ? h('img', { src: img, alt: item.name, onerror: e => { if (showUp) { e.target.src = item.img; } } })
           : h('div', { class: 'detail-noimg' }, item.name),
-        item.imgUp && h('div', { class: 'seg', role: 'group', 'aria-label': '강화 전/후 이미지' },
-          h('button', { class: showUp ? null : 'on', onclick: () => { showUp = false; render(); } }, '강화 전'),
-          h('button', { class: showUp ? 'on' : null, onclick: () => { showUp = true; render(); } }, '강화 후'),
+        canUpgrade && h('div', { class: 'seg', role: 'group', 'aria-label': '강화 전/후 보기' },
+          h('button', { class: showUp ? null : 'on', 'aria-pressed': String(!showUp), onclick: () => { showUp = false; render(); } }, '강화 전'),
+          h('button', { class: showUp ? 'on' : null, 'aria-pressed': String(showUp), onclick: () => { showUp = true; render(); } }, '강화 후 ✦'),
         ),
       ),
       h('div', { class: 'detail-body' },
-        h('h2', { class: 'detail-title' }, item.name),
+        h('h2', { class: `detail-title${showUp ? ' is-up' : ''}` }, item.name, showUp ? '+' : ''),
         item.nameEn && item.nameEn !== item.name && h('div', { class: 'detail-sub' }, item.nameEn),
         meta(item, category),
-        ...bodyFor(item, category, db),
+        ...bodyFor(item, category, db, showUp),
         h('a', {
           class: 'detail-wiki',
           href: `https://slaythespire.wiki.gg/wiki/Special:Search?go=Go&search=${encodeURIComponent(`Slay the Spire 2:${item.name}`)}`,
@@ -81,7 +82,7 @@ function costText(cost, stars) {
   return parts.join(' · ');
 }
 
-function bodyFor(item, category, db) {
+function bodyFor(item, category, db, showUp = false) {
   // 적: HP 와 행동 패턴
   if (item.members) {
     return [
@@ -100,32 +101,14 @@ function bodyFor(item, category, db) {
     ];
   }
 
-  // 카드: 강화 전/후
+  // 카드: 토글에 따라 강화 전/후 코스트와 효과 하나만 보여 준다. 강화 후에는 바뀐 값을 초록색으로.
   if (category.id === 'cards' || category.id === 'curses') {
-    const cost = costText(item.cost, item.stars);
-    const costUp = item.costUp !== undefined ? costText(item.costUp, item.stars) : null;
-    if (item.textUp || costUp) {
-      return [
-        h('div', { class: 'upgrade' },
-          h('section', { class: 'upgrade-col' },
-            h('h3', {}, '강화 전'),
-            cost && h('p', { class: 'detail-cost' }, cost),
-            html('detail-text', item.textBase || item.text),
-          ),
-          h('div', { class: 'upgrade-arrow', 'aria-hidden': 'true' }, '→'),
-          h('section', { class: 'upgrade-col up' },
-            h('h3', {}, '강화 후'),
-            (costUp || cost) && h('p', { class: `detail-cost${costUp ? ' changed' : ''}` }, costUp || cost),
-            html('detail-text', item.textUp || item.text),
-          ),
-        ),
-        h('p', { class: 'detail-note' }, h('span', { class: 'chg' }, '밑줄'), '은 강화로 바뀌는 부분, ', h('span', { class: 'up' }, '초록색'), '은 강화 후 값입니다.'),
-      ];
-    }
+    const costChanged = showUp && item.costUp !== undefined;
+    const cost = costText(costChanged ? item.costUp : item.cost, item.stars);
+    const text = showUp ? (item.textUp || item.text) : item.text.replace(/<span class="up">\([^<]*\)<\/span>/g, '');
     return [
-      cost && h('p', { class: 'detail-cost' }, cost),
-      html('detail-text', item.text),
-      category.id === 'cards' && item.imgUp && h('p', { class: 'detail-note' }, '위키 데이터에 강화 시 효과 문구 변화가 없습니다. 강화 후 이미지로 차이를 확인하세요.'),
+      cost && h('p', { class: `detail-cost${costChanged ? ' changed' : ''}` }, cost),
+      html(`detail-text${showUp ? ' is-up' : ''}`, text),
     ];
   }
 
