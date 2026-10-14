@@ -7,7 +7,12 @@ export function h(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') {
+      for (const [prop, val] of Object.entries(v)) {
+        if (prop.startsWith('--')) el.style.setProperty(prop, val);
+        else el.style[prop] = val;
+      }
+    }
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (k === 'html') el.innerHTML = v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -66,6 +71,7 @@ export function attachTooltips(root, lookup) {
 
 export function itemDetails(item) {
   const meta = [
+    item.nameEn,
     item.groupName,
     item.rarity && rarityKo(item.rarity),
     item.type && typeKo(item.type),
@@ -74,7 +80,8 @@ export function itemDetails(item) {
   return [
     h('div', { class: 'tip-title' }, item.name),
     meta && h('div', { class: 'tip-meta' }, meta),
-    item.text && h('div', { class: 'tip-text' }, item.text),
+    // text 는 수집 스크립트가 이스케이프한 뒤 만든 HTML 이다.
+    item.text && h('div', { class: 'tip-text', html: item.text }),
   ];
 }
 

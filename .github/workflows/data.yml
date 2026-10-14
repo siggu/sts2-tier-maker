@@ -1,0 +1,50 @@
+name: 게임 데이터 갱신
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/**'
+      - '.github/workflows/data.yml'
+  schedule:
+    - cron: '17 3 * * 1'   # 매주 월요일 12:17 KST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+
+      - run: npm ci
+        working-directory: tools
+      - run: npm test
+        working-directory: tools
+
+      - name: 위키에서 데이터·이미지 수집
+        run: node tools/fetch-data.mjs
+
+      - name: 바뀐 내용 커밋
+        run: |
+          git add site/data
+          if git diff --cached --quiet; then
+            echo "변경 없음"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "data: 위키 데이터 갱신"
+          git push

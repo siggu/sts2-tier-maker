@@ -6,6 +6,11 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
+  # 데이터 갱신 워크플로가 GITHUB_TOKEN 으로 커밋하면 push 이벤트가 생기지 않으므로 이어서 실행한다.
+  workflow_run:
+    workflows: ['게임 데이터 갱신']
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +24,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

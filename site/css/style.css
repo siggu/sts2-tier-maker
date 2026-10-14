@@ -16,6 +16,8 @@
   --tile-w: 74px;
   --tile-h: 100px;
   --icon: 64px;
+  --creature-w: 96px;
+  --creature-h: 82px;
   --font-title: "Gowun Batang", "Kreon", serif;
   --font-game: "Kreon", "Gowun Batang", serif;
   --font-ui: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
@@ -87,7 +89,8 @@ button, input, select { font: inherit; color: inherit; }
 .topnav a:hover { color: var(--text); }
 .topnav a.active { color: #1a1206; background: linear-gradient(180deg, #f0c76a, #c98f2c); }
 
-.app { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; outline: none; }
+.app { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; }
+.app:focus, .app:focus-visible { outline: none; }
 
 .foot {
   max-width: 1240px; margin: 0 auto; padding: 24px 16px 40px;
@@ -150,6 +153,8 @@ button, input, select { font: inherit; color: inherit; }
 .cat-preview img:first-child { margin-left: 0; }
 .cat-preview.tile-card img, .cat-preview.tile-portrait img { width: 40px; height: 54px; margin-left: -18px; }
 .cat-preview.tile-card img:first-child, .cat-preview.tile-portrait img:first-child { margin-left: 0; }
+.cat-preview.tile-creature img { width: 54px; height: 46px; margin-left: -16px; }
+.cat-preview.tile-creature img:first-child { margin-left: 0; }
 
 .tpl-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .tpl {
@@ -272,6 +277,7 @@ button, input, select { font: inherit; color: inherit; }
 .tile img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .55)); }
 .tile-card, .tile-portrait { width: var(--tile-w); height: var(--tile-h); }
 .tile-icon { width: var(--icon); height: var(--icon); }
+.tile-creature { width: var(--creature-w); height: var(--creature-h); }
 .tile-icon:not(.no-img) { background: radial-gradient(circle at 50% 55%, rgba(255, 220, 150, .12), transparent 70%); }
 .tile.no-img {
   padding: 4px;
@@ -334,6 +340,11 @@ body.is-dragging * { cursor: grabbing !important; }
 .tip-title { font-family: var(--font-game); font-weight: 700; font-size: 16px; color: var(--gold-hi); }
 .tip-meta { margin-top: 2px; font-size: 12px; color: var(--gold); }
 .tip-text { margin-top: 6px; font-size: 13.5px; line-height: 1.5; color: var(--text); white-space: pre-line; }
+.tip-text b { color: var(--gold); font-weight: 700; }
+.tip-text .up { color: #7fd36b; font-weight: 700; }
+.tip-text .ic { font-style: normal; }
+.tip-text .ic.energy { color: #f5c451; }
+.tip-text .ic.star { color: #f3dfae; }
 
 /* ---- 팝오버 ---- */
 .popover {
@@ -375,6 +386,7 @@ body.is-dragging * { cursor: grabbing !important; }
 .result .tile { cursor: default; }
 .result .tile-card, .result .tile-portrait { --tile-w: 54px; --tile-h: 72px; }
 .result .tile-icon { --icon: 52px; }
+.result .tile-creature { --creature-w: 64px; --creature-h: 56px; }
 .result-main { flex: 1; min-width: 0; }
 .result-name { font-family: var(--font-game); font-weight: 700; font-size: 16px; color: var(--gold-hi); }
 .result-group { margin-left: 8px; font-family: var(--font-ui); font-size: 12px; font-weight: 500; color: var(--muted); }
@@ -410,7 +422,7 @@ body.is-dragging * { cursor: grabbing !important; }
 
 /* ---- 모바일 ---- */
 @media (max-width: 640px) {
-  :root { --tile-w: 56px; --tile-h: 76px; --icon: 50px; }
+  :root { --tile-w: 56px; --tile-h: 76px; --icon: 50px; --creature-w: 74px; --creature-h: 64px; }
   .app { padding: 14px 12px 32px; }
   .topbar { padding: 8px 12px; }
   .brand span { font-size: 16px; }

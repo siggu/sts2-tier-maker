@@ -461,7 +461,7 @@ async function start() {
     return;
   }
   const v = document.getElementById('data-version');
-  if (v) v.textContent = [db.version && `게임 버전 ${db.version}`, db.fetchedAt && `수집 ${db.fetchedAt.slice(0, 10)}`].filter(Boolean).join(' · ');
+  if (v && db.fetchedAt) v.textContent = `데이터 수집 ${db.fetchedAt.slice(0, 10)}`;
   window.addEventListener('hashchange', route);
   route();
 }

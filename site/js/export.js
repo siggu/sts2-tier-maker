@@ -4,6 +4,7 @@ const TILE = {
   card: { w: 96, h: 124 },
   portrait: { w: 96, h: 124 },
   icon: { w: 76, h: 76 },
+  creature: { w: 112, h: 96 },
 };
 const LABEL_W = 132;
 const GAP = 6;

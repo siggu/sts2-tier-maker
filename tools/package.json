@@ -1,0 +1,13 @@
+{
+  "name": "sts2-data-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fetch": "node fetch-data.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "luaparse": "0.3.1",
+    "sharp": "0.34.4"
+  }
+}
