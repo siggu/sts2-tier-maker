@@ -500,7 +500,7 @@ function galleryCard(post, db, { showTemplate = true } = {}) {
     communityResults(tpl.category.id).then(results => {
       const cmp = results && compareWithResults(rows, tpl, results);
       if (!cmp?.compared) return;
-      match.replaceChildren(h('i', { 'aria-hidden': 'true' }), t('gallery.bal.match', { n: cmp.pct }));
+      match.replaceChildren(h('i', { 'aria-hidden': 'true' }), h('span', {}, t('gallery.bal.match', { n: cmp.pct })));
       match.title = t('gallery.bal.matchDetail', { n: cmp.pct, agree: cmp.agree, compared: cmp.compared });
       match.hidden = false;
     });

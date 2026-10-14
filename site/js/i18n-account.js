@@ -280,7 +280,7 @@ export default {
     'gallery.bal.short.nerf': 'Nerf',
     'gallery.bal.short.fair': 'Fair',
     'gallery.bal.short.buff': 'Buff',
-    'gallery.bal.match': '{n}% match with everyone',
+    'gallery.bal.match': '{n}% majority match',
     'gallery.bal.matchDetail': '{n}% match with everyone’s results ({agree}/{compared})',
     'gallery.bal.legendAgree': 'Same as the majority',
     'gallery.bal.legendDiffer': 'Minority view',

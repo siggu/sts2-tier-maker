@@ -185,6 +185,7 @@ a.gal-card:hover { transform: translateY(-2px); border-color: var(--line-strong)
   font-size: 12.5px; font-weight: 700; color: #b7dd84;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.gal-card-match span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .gal-card-match i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .gal-card-match[hidden] { display: none; }
 
