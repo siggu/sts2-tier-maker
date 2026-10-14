@@ -20,6 +20,17 @@ Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리�
 1. **Settings → Pages → Source**를 `GitHub Actions`로 바꿉니다.
 2. 투표 API를 쓰려면 **Settings → Secrets and variables → Actions**에 `CLOUDFLARE_API_TOKEN`(Workers 스크립트·D1 편집 권한)을 넣습니다. 계정 ID는 `api/wrangler.toml`의 `account_id`에 있습니다. 첫 배포 때 D1 데이터베이스 `sts2-balance`가 자동으로 만들어집니다.
 
+## 한국어 (게임 공식 번역)
+
+카드·유물·포션·인챈트·적·고대의 존재 이름과 효과는 게임 언어 파일의 공식 한국어를 쓴다.
+`tools/l10n/ko.json`에는 사이트에 필요한 이름과 효과 문구 틀만 들어 있고, 원본 언어 파일은 저장소에 넣지 않는다.
+효과의 수치는 위키(영어)에서 읽어 한국어 틀에 채우며, 맞추지 못한 항목은 영어 효과로 보인다.
+
+게임 패치 후 갱신하는 방법:
+1. [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases)로 게임 폴더의 `SlayTheSpire2.pck`에서 `localization` 폴더를 꺼낸다.
+2. `node tools/build-l10n.mjs <localization 폴더>` 를 실행한다 (`eng`, `kor` 폴더가 들어 있는 곳).
+3. 바뀐 `tools/l10n/ko.json`을 커밋하면 데이터 갱신 워크플로가 다시 돈다.
+
 ## 로컬 실행
 
 ```sh

@@ -90,7 +90,8 @@ function buildTemplates(cat) {
     out.push({ ...makeTemplate(cat, id, parts, items, section), sectionLabel });
   };
   const group = g => ({ facet: 'group', value: g.id, label: g.name, color: g.color });
-  const facet = (f, v) => ({ facet: f, value: v, label: facetLabel(f, v) });
+  // 값은 영어(묶음 주소가 안 바뀌게), 보이는 이름은 카테고리의 한국어 표(labels)가 있으면 그것으로
+  const facet = (f, v) => ({ facet: f, value: v, label: cat.labels?.[f]?.[v] || facetLabel(f, v) });
 
   if (cat.items.length <= TEMPLATE_LIMIT) add([], cat.items, 'all');
 

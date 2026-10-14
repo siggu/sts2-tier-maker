@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { parseLuaData } from './lua.mjs';
+import { alignValues, renderKoBoth, splitKeywords, withKeywords } from './l10n.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'site', 'data');
@@ -24,6 +25,53 @@ const CHARACTERS = [
 ];
 const SHARED_GROUP = { id: 'shared', name: '공용', color: '#9a9a9a' };
 const charByEn = new Map(CHARACTERS.map(c => [c.en, c]));
+
+// ---------------------------------------------------------------- 한국어 (게임 공식 번역)
+// tools/l10n/ko.json 은 게임 언어 파일에서 tools/build-l10n.mjs 로 뽑아 만든다.
+// 이름은 공식 한국어로 바꾸고, 효과는 영어 틀로 위키 문구의 수치를 읽어 한국어 틀에 채운다.
+// 맞추지 못한 효과는 영어 그대로 두고 textEn 으로 표시한다.
+let KO = null;
+try { KO = JSON.parse(await readFile(join(ROOT, 'tools', 'l10n', 'ko.json'), 'utf8')); } catch { /* 한국어 파일 없음 → 영어 */ }
+const lc = s => String(s).trim().toLowerCase();
+const koOf = (table, en) => KO?.[table]?.[lc(en)];
+const koName = (table, en) => { const v = koOf(table, en); return typeof v === 'string' ? v : v?.name; };
+// 효과 문구 속 이름 값(예: 인챈트 이름)을 옮길 때 쓰는 영어 → 한국어 표
+const WORDS = KO ? Object.fromEntries(['cards', 'relics', 'potions', 'enchantments']
+  .flatMap(t => Object.entries(KO[t] || {}).map(([en, v]) => [en, v.name]))) : {};
+const l10nStats = { total: 0, name: 0, text: 0 };
+
+function localize(table, enName, wikiText, { keywords = false, upgradable = false } = {}) {
+  l10nStats.total++;
+  const e = koOf(table, enName);
+  if (!e) return null;
+  l10nStats.name++;
+  const out = { name: e.name, nameEn: enName };
+  if (e.en && e.ko && wikiText) {
+    const split = keywords ? splitKeywords(wikiText) : { text: wikiText, keywords: [] };
+    const vals = alignValues(e.en, split.text);
+    if (vals) {
+      try {
+        const r = renderKoBoth(e.ko, vals, WORDS);
+        const kw = split.keywords;
+        out.text = withKeywords(r.text, kw, KO.keywords, false, false);
+        if (upgradable && (r.textUp || kw.some(k => k.base !== k.up))) {
+          out.textUp = withKeywords(r.textUp || r.text, kw, KO.keywords, true, true);
+        }
+        l10nStats.text++;
+      } catch { /* 값이 모자라면 영어 효과 유지 */ }
+    }
+  }
+  return out;
+}
+
+// 한국어를 아이템에 덮어쓴다. 효과를 맞추지 못했으면 영어 효과를 두고 textEn 표시.
+function applyKo(item, ko) {
+  if (!ko) return item;
+  item.name = ko.name;
+  item.nameEn = ko.nameEn;
+  if (ko.text) { item.text = ko.text; item.textUp = ko.textUp; } else if (item.text) item.textEn = true;
+  return item;
+}
 
 // ---------------------------------------------------------------- 가져오기
 
@@ -256,9 +304,10 @@ function cardItem(name, c, id, group) {
   const upgradable = !c.NoUpgrade && c.Rarity !== 'Curse';
   const changed = hasUpgrade(c.Text);
   const costUp = c.CostPlus ?? undefined;
-  return {
+  const nameEn = name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, '');
+  return applyKo({
     id,
-    name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''),
+    name: nameEn,
     group,
     rarity: c.Rarity.toLowerCase(),
     type: String(c.Type || '').toLowerCase() || undefined,
@@ -269,7 +318,7 @@ function cardItem(name, c, id, group) {
     textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
     img: image(c.Image, 'cards', id, { height: 300 }),
     imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300 }) : undefined,
-  };
+  }, localize('cards', nameEn, c.Text, { keywords: true, upgradable }));
 }
 
 async function curses() {
@@ -278,7 +327,10 @@ async function curses() {
     .filter(([, c]) => c.Rarity === 'Curse' && !c.Multiplayer)
     .map(([name, c]) => {
       const id = slug(name);
-      return { id, name, cost: c.Cost ?? undefined, text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) };
+      return applyKo(
+        { id, name, cost: c.Cost ?? undefined, text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) },
+        localize('cards', name, c.Text, { keywords: true }),
+      );
     });
   return { id: 'curses', name: '저주', tile: 'card', items };
 }
@@ -292,20 +344,25 @@ async function relics() {
     if (!RELIC_RARITIES.includes(r.Rarity)) continue;
     const ch = charByEn.get(r.Character);
     const id = slug(name);
-    items.push({
+    const koFlavor = koOf('relics', name)?.flavor;
+    items.push(applyKo({
       id, name,
       group: ch ? ch.id : SHARED_GROUP.id,
       rarity: r.Rarity.toLowerCase(),
-      flavor: r.Flavor && !/revealed in the future/i.test(r.Flavor) ? escapeHtml(formatPlain(r.Flavor)) : undefined,
+      flavor: koFlavor && !/추후 공개/.test(koFlavor)
+        ? escapeHtml(koFlavor.replace(/\[\/?[a-z_]+(?:=[^\]]*)?\]/g, '').trim())
+        : r.Flavor && !/revealed in the future/i.test(r.Flavor) ? escapeHtml(formatPlain(r.Flavor)) : undefined,
       source: r.AncientSource ? String(r.AncientSource).replace(/\{\{[^|}]*\|([^}]*)\}\}/g, '$1').replace(/[\[\]]/g, '').trim() : undefined,
       text: formatText(r.Description),
       img: image(r.Image, 'relics', id, { height: 128, width: 128 }),
-    });
+    }, localize('relics', name, r.Description)));
   }
   return {
     id: 'relics', name: '유물', tile: 'icon', groupLabel: '캐릭터',
     // 희귀도별로 나누고, 고대 유물처럼 너무 많은 묶음은 그 유물을 주는 고대의 존재별로 다시 나눈다.
     split: { by: ['rarity'], overflow: 'source', sharedGroup: SHARED_GROUP.id },
+    // 묶음 이름에 쓰는 고대의 존재 한국어 이름 (값은 영어로 두어 묶음 주소가 바뀌지 않게)
+    labels: { source: Object.fromEntries(ANCIENTS.map(a => [a, koName('ancients', a) || a])) },
     groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), SHARED_GROUP],
     items,
   };
@@ -318,13 +375,13 @@ async function potions() {
     if (!['Common', 'Uncommon', 'Rare'].includes(p.Rarity)) continue;
     const ch = charByEn.get(p.Character);
     const id = slug(name);
-    items.push({
+    items.push(applyKo({
       id, name,
       group: ch ? ch.id : SHARED_GROUP.id,
       rarity: p.Rarity.toLowerCase(),
       text: formatText(p.Text),
       img: image(p.Image, 'potions', id, { height: 128, width: 128 }),
-    });
+    }, localize('potions', name, p.Text)));
   }
   return {
     id: 'potions', name: '포션', tile: 'icon', groupLabel: '캐릭터',
@@ -341,6 +398,7 @@ const AREAS = [
   { en: 'Hive', id: 'hive', name: '2막 · Hive', color: '#c99a3a' },
   { en: 'Glory', id: 'glory', name: '3막 · Glory', color: '#a06ad0' },
 ];
+for (const a of AREAS) a.name = a.name.replace(a.en, koName('acts', a.en) || a.en);
 const areaByEn = new Map(AREAS.map(a => [a.en, a]));
 
 // 같은 전투에 함께 나오는 적(예: The Kin = Kin Follower + Kin Priest)은 하나로 묶는다.
@@ -364,23 +422,29 @@ function enemyItems(data, type, folder, fallbackArea) {
   return encounters(data, type).map(e => {
     const id = slug(e.name);
     const area = areaByEn.get(e.debut) || fallbackArea;
+    const memberName = n => koName('monsters', n) || n;
+    const nameKo = koName('encounters', e.name) || koName('monsters', e.name);
     return {
-      id, name: e.name,
+      id, name: nameKo || e.name,
+      nameEn: nameKo ? e.name : undefined,
       group: area?.id,
       text: escapeHtml([
         area?.name,
         e.hp && `HP ${e.hp}`,
-        e.members.length > 1 && e.members.map(m => m.name).join(', '),
+        e.members.length > 1 && e.members.map(m => memberName(m.name)).join(', '),
       ].filter(Boolean).join('\n')),
       img: image(e.first.Image, folder, id, { height: 220, width: 260, trim: true }),
       area: area?.name,
       members: e.members.map(m => ({
-        name: m.name,
+        name: memberName(m.name),
         hp: m.BaseHP ? String(m.BaseHP) : undefined,
         hpAsc: m.AscHP && m.AscHP !== m.BaseHP ? String(m.AscHP) : undefined,
         moves: (Array.isArray(m.Intents) ? m.Intents : Object.values(m.Intents || {}))
           .filter(x => x && x.Name)
-          .map(x => ({ name: String(x.Name), text: formatEnemyText(x.Text) })),
+          .map(x => ({
+            name: KO?.moves?.[`${lc(m.name)}|${lc(x.Name)}`] || KO?.moves?.[`*|${lc(x.Name)}`] || String(x.Name),
+            text: formatEnemyText(x.Text),
+          })),
       })),
     };
   });
@@ -410,7 +474,10 @@ async function enchantmentCategory() {
   const data = await module('Module:Keywords/StS2 data/Enchantments');
   const items = Object.entries(data).map(([name, e]) => {
     const id = slug(name);
-    return { id, name, text: formatText(e.Text), img: image(e.Image, 'enchantments', id, { height: 128, width: 128 }) };
+    return applyKo(
+      { id, name, text: formatText(e.Text), img: image(e.Image, 'enchantments', id, { height: 128, width: 128 }) },
+      localize('enchantments', name, e.Text),
+    );
   });
   return { id: 'enchantments', name: '인챈트', tile: 'icon', items };
 }
@@ -458,7 +525,7 @@ async function charactersAndAncients() {
   const data = await module('Module:Keywords/StS2 data/Characters');
   // 캐릭터는 전신 원화, 고대의 존재는 지도 아이콘을 쓴다.
   const chars = CHARACTERS.map(c => ({
-    id: c.id, name: c.name, nameEn: c.en,
+    id: c.id, name: koName('characters', c.en) || c.name, nameEn: c.en,
     img: image(`StS2_${c.en}.png`, 'characters', c.id, { height: 240, width: 200, trim: true }),
   }));
   const acts = await ancientActs();
@@ -466,11 +533,14 @@ async function charactersAndAncients() {
     .filter(name => ANCIENTS.includes(name))
     .map(name => {
       const a = (acts.get(name) || []).map(n => ANCIENT_ACTS[n - 1]).filter(Boolean);
+      const ko = koName('ancients', name);
+      const title = koName('ancientEpithets', name);
       return {
-        id: slug(name), name,
+        id: slug(name), name: ko || name,
+        nameEn: ko ? name : undefined,
         group: a[0]?.id,
         groups: a.length > 1 ? a.map(x => x.id) : undefined,
-        text: a.length ? escapeHtml(`등장: ${a.map(x => x.name).join(', ')}`) : undefined,
+        text: escapeHtml([title, a.length && `등장: ${a.map(x => x.name).join(', ')}`].filter(Boolean).join('\n')) || undefined,
         img: image(`StS2_Map-${name}.png`, 'ancients', slug(name), { height: 160, width: 160 }),
       };
     });
@@ -513,7 +583,7 @@ async function main() {
         if (item[key] === undefined) delete item[key];
       }
     }
-    cat.items.sort((a, b) => a.name.localeCompare(b.name, 'en'));
+    cat.items.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   }
 
   let previous = null;
@@ -535,6 +605,7 @@ async function main() {
   await writeFile(join(DATA, 'keys.json'), JSON.stringify(keys));
 
   for (const c of categories) console.log(`${c.name}: ${c.items.length}개`);
+  if (KO) console.log(`한국어: 이름 ${l10nStats.name}/${l10nStats.total}, 효과 ${l10nStats.text}/${l10nStats.total}`);
   console.log(same ? '데이터 변경 없음' : '데이터 갱신됨');
   // 이미지가 일부 빠져도 데이터는 저장하되(이름 타일로 표시됨), 워크플로에서 알 수 있게 표시한다.
   if (imageStats?.failed && process.env.GITHUB_OUTPUT) {

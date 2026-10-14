@@ -43,7 +43,7 @@ export function openDetail(item, category, db) {
         ...bodyFor(item, category, db, showUp),
         h('a', {
           class: 'detail-wiki',
-          href: `https://slaythespire.wiki.gg/wiki/Special:Search?go=Go&search=${encodeURIComponent(`Slay the Spire 2:${item.name}`)}`,
+          href: `https://slaythespire.wiki.gg/wiki/Special:Search?go=Go&search=${encodeURIComponent(`Slay the Spire 2:${item.nameEn || item.name}`)}`,
           target: '_blank', rel: 'noopener',
         }, '위키에서 보기 ↗'),
       ),
@@ -83,7 +83,7 @@ function meta(item, category) {
     item.area,
     item.rarity && rarityKo(item.rarity),
     item.type && typeKo(item.type),
-    item.source && `${item.source}의 유물`,
+    item.source && `${category.labels?.source?.[item.source] || item.source}의 유물`,
   ].filter((c, i, all) => c && all.indexOf(c) === i);
   return chips.length ? h('div', { class: 'detail-chips' }, chips.map(c => h('span', {}, c))) : null;
 }
@@ -113,6 +113,8 @@ function bodyFor(item, category, db, showUp = false) {
       )),
       item.members.some(m => m.moves.some(mv => mv.text.includes('class="asc"'))) &&
         h('p', { class: 'detail-note' }, h('span', { class: 'asc' }, '주황색'), ' 수치는 승천 난이도에서 바뀌는 값입니다.'),
+      item.members.some(m => m.moves.length) &&
+        h('p', { class: 'detail-note' }, '행동 설명은 위키의 영어 원문입니다.'),
     ];
   }
 
@@ -124,12 +126,13 @@ function bodyFor(item, category, db, showUp = false) {
     return [
       cost && h('p', { class: `detail-cost${costChanged ? ' changed' : ''}` }, cost),
       html(`detail-text${showUp ? ' is-up' : ''}`, text),
+      item.textEn && h('p', { class: 'detail-note' }, '이 항목은 공식 한국어 효과를 아직 맞추지 못해 영어 원문을 보여 줍니다.'),
     ];
   }
 
   // 고대의 존재: 주는 유물
   if (category.id === 'ancients') {
-    const relics = db.categories.find(c => c.id === 'relics')?.items.filter(r => r.source === item.name) || [];
+    const relics = db.categories.find(c => c.id === 'relics')?.items.filter(r => r.source === (item.nameEn || item.name)) || [];
     return [
       item.text && html('detail-text', item.text),
       relics.length > 0 && h('section', { class: 'detail-sec' },
@@ -148,6 +151,7 @@ function bodyFor(item, category, db, showUp = false) {
 
   return [
     item.text && html('detail-text', item.text),
+    item.textEn && h('p', { class: 'detail-note' }, '이 항목은 공식 한국어 효과를 아직 맞추지 못해 영어 원문을 보여 줍니다.'),
     item.flavor && h('p', { class: 'detail-flavor', html: item.flavor }),
   ];
 }
