@@ -12,3 +12,7 @@ binding = "DB"
 database_name = "sts2-balance"
 database_id = "__D1_DATABASE_ID__"
 migrations_dir = "migrations"
+
+# 투표 처리 중 오류를 Cloudflare 대시보드(Workers → Logs)에서 볼 수 있게 한다.
+[observability]
+enabled = true
