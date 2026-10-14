@@ -8,7 +8,7 @@ import {
 } from './tierlist.js';
 import { renderPng } from './export.js';
 import { openDetail, closeDetail } from './detail.js';
-import { verdictsFor, loadMine, saveMine, unsubmittedChanges, submitChanges, onSyncStatus, fetchResults, flush } from './balance.js';
+import { verdictsFor, loadMine, saveMine, loadSubmitted, unsubmittedChanges, submitChanges, onSyncStatus, fetchResults, flush } from './balance.js';
 
 const app = document.getElementById('app');
 let db = null;
@@ -33,6 +33,7 @@ function route() {
   if (parts[0] === 'tier' && parts[1]) return viewTier(parts[1], params.get('s'));
   if (parts[0] === 'c' && parts[1]) return viewCategory('tier', parts[1]);
   if (parts[0] === 'balance' && parts[1] === 'c' && parts[2]) return viewCategory('balance', parts[2]);
+  if (parts[0] === 'balance' && parts[1] === 'mine') return viewMyVotes();
   if (parts[0] === 'balance' && parts[1] && parts[2] === 'results') return viewResults(parts[1]);
   if (parts[0] === 'balance' && parts[1]) return viewBalance(parts[1]);
   return viewHome(parts[0] === 'balance' ? 'balance' : 'tier');
@@ -170,11 +171,16 @@ function viewHome(mode) {
     );
   });
 
+  const myCount = mode === 'balance' ? myVoteCount() : 0;
   render(
     h('section', { class: 'hero' },
       h('p', { class: 'eyebrow' }, 'Slay the Spire 2 · 비공식 팬 사이트'),
       h('h1', {}, '첨탑의 티어 메이커'),
       modeSwitch(mode),
+      myCount > 0 && h('a', { class: 'my-votes-link', href: '#/balance/mine' },
+        h('span', { class: 'mvl-icon', 'aria-hidden': 'true' }, '🗳️'),
+        h('span', {}, h('strong', {}, '내 투표 보기'), ` · 제출한 표 ${myCount}개`),
+        h('span', { 'aria-hidden': 'true' }, '›')),
     ),
     started.length > 0 && h('section', { class: 'block' },
       h('h2', { class: 'block-title' }, '이어서 하기'),
@@ -566,6 +572,7 @@ function viewBalance(templateId) {
         h('div', { class: 'actions' },
           submitBtn,
           h('a', { class: 'btn', href: `#/balance/${template.id}/results` }, '모두의 결과'),
+          h('a', { class: 'btn ghost', href: '#/balance/mine' }, '내 투표'),
         ),
       ),
       usageHint('balance'),
@@ -624,19 +631,29 @@ async function viewResults(templateId) {
   const rows = template.items.map(item => ({ item, c: results[item.key] || [0, 0, 0] }));
   const voted = rows.filter(r => sum(r.c) > 0);
   const totalVotes = voted.reduce((s, r) => s + sum(r.c), 0);
+  const mine = loadSubmitted(template.category.id);
+  const myInTemplate = template.items.filter(i => mine[i.id]).length;
+  let onlyMine = false;
 
   function draw() {
-    const sorted = voted.slice().sort((a, b) => SORTS[sort].score(b.c) - SORTS[sort].score(a.c) || sum(b.c) - sum(a.c));
+    const shown = onlyMine ? voted.filter(r => mine[r.item.id]) : voted;
+    const sorted = shown.slice().sort((a, b) => SORTS[sort].score(b.c) - SORTS[sort].score(a.c) || sum(b.c) - sum(a.c));
     const body = layout === 'list' ? listView(sorted) : boardView(sorted);
     render(
       boardHeader('balance', template),
       h('div', { class: 'board-head' },
         h('div', { class: 'board-title' },
           h('h1', { class: 'board-h1' }, `${template.title} · 모두의 결과`),
-          h('div', { class: 'board-progress' }, h('span', {}, `${voted.length}개 항목 · 총 ${totalVotes}표`)),
+          h('div', { class: 'board-progress' },
+            h('span', {}, `${voted.length}개 항목 · 총 ${totalVotes}표`),
+            myInTemplate > 0 && h('span', { class: 'my-count' }, `내 표 ${myInTemplate}개`)),
         ),
         h('div', { class: 'actions' },
           h('a', { class: 'btn', href: `#/balance/${template.id}` }, '내 투표로'),
+          myInTemplate > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': '표시 범위' },
+            h('button', { class: onlyMine ? null : 'on', onclick: () => { onlyMine = false; draw(); } }, '전체'),
+            h('button', { class: onlyMine ? 'on' : null, onclick: () => { onlyMine = true; draw(); } }, '내 표만'),
+          ),
           h('div', { class: 'seg', role: 'group', 'aria-label': '보기 방식' },
             h('button', { class: layout === 'list' ? 'on' : null, onclick: () => { layout = 'list'; draw(); } }, '목록'),
             h('button', { class: layout === 'board' ? 'on' : null, onclick: () => { layout = 'board'; draw(); } }, '보드'),
@@ -665,7 +682,8 @@ async function viewResults(templateId) {
         tile(item, template),
         h('div', { class: 'result-main' },
           h('div', { class: 'result-name' }, item.name,
-            item.groupName && !template.group && h('span', { class: 'result-group' }, item.groupName)),
+            item.groupName && !template.group && h('span', { class: 'result-group' }, item.groupName),
+            myChip(VERDICTS, mine[item.id], c)),
           h('div', { class: 'bar', role: 'img', 'aria-label': VERDICTS.map((v, i) => `${v.sub} ${pct(c[i], total)}%`).join(', ') },
             VERDICTS.map((v, i) => c[i] > 0 && h('span', { class: `seg-${v.v}`, style: { flexGrow: c[i], background: v.color } },
               pct(c[i], total) >= 12 ? `${pct(c[i], total)}%` : '')),
@@ -698,8 +716,137 @@ async function viewResults(templateId) {
       template, readonly: true,
       onOpen: id => openDetail(template.byId.get(id), template.category, db),
       rows: VERDICTS.map((v, i) => ({ label: v.label, sub: v.sub, color: v.color, items: groups[i] })),
-      decorate: (el, item) => el.append(h('span', { class: 'badge' }, `${share.get(item.id)}%`)),
+      decorate: (el, item) => {
+        el.append(h('span', { class: 'badge' }, `${share.get(item.id)}%`));
+        const v = VERDICTS.find(x => x.v === mine[item.id]);
+        if (v) el.append(h('span', { class: 'mine-dot', style: { background: v.color }, title: `내 표: ${v.label}` }, '내'));
+      },
     });
+  }
+
+  draw();
+}
+
+// ---------------------------------------------------------------- 내 투표
+
+// 내 판정 표시. 결과(c)가 있으면 다수 의견과 같은지도 보여 준다.
+function myChip(verdicts, v, c) {
+  const mine = verdicts.find(x => x.v === v);
+  if (!mine) return null;
+  const idx = verdicts.indexOf(mine);
+  let agree = null;
+  if (c && sum(c) > 0) {
+    const top = Math.max(...c);
+    agree = c[idx] === top;
+  }
+  return h('span', { class: 'my-chip', style: { '--v': mine.color } },
+    h('i', { 'aria-hidden': 'true' }),
+    `내 표: ${mine.label}`,
+    agree === true && h('em', { class: 'agree' }, '· 다수와 같음'),
+    agree === false && h('em', { class: 'differ' }, '· 소수 의견'),
+  );
+}
+
+function myVoteCount() {
+  return db.categories.reduce((n, cat) => n + Object.keys(loadSubmitted(cat.id)).filter(id => cat.byId.has(id)).length, 0);
+}
+
+async function viewMyVotes() {
+  const cats = db.categories
+    .map(cat => ({ cat, mine: loadSubmitted(cat.id) }))
+    .map(x => ({ ...x, ids: Object.keys(x.mine).filter(id => x.cat.byId.has(id)) }))
+    .filter(x => x.ids.length);
+  const pending = db.categories.reduce((n, cat) =>
+    n + unsubmittedChanges(cat.id, loadMine(cat.id), cat.items.map(i => i.id)).length, 0);
+
+  if (!cats.length) {
+    render(
+      crumbs('balance', ['내 투표']),
+      h('section', { class: 'empty' },
+        h('h2', {}, '아직 제출한 표가 없습니다'),
+        h('p', {}, '항목을 칸에 옮긴 뒤 "투표 완료"를 누르면 여기에 모입니다.'),
+        pending > 0 && h('p', { class: 'draft-note' }, `제출하지 않은 변경 ${pending}개가 있습니다.`),
+        h('p', {}, h('a', { class: 'btn primary', href: '#/balance' }, '투표하러 가기')),
+      ),
+    );
+    return;
+  }
+
+  let filter = 'all';
+  const results = new Map();
+  await Promise.all(cats.map(async x => {
+    try { results.set(x.cat.id, await fetchResults(x.cat.id)); } catch { /* 결과 없이 내 표만 보여 준다 */ }
+  }));
+
+  function draw() {
+    let total = 0, agree = 0, compared = 0;
+    const sections = cats.map(({ cat, mine, ids }) => {
+      const VERDICTS = verdictsFor(cat.id);
+      const res = results.get(cat.id);
+      const order = { nerf: 0, fair: 1, buff: 2 };
+      const list = ids
+        .filter(id => filter === 'all' || mine[id] === filter)
+        .map(id => cat.byId.get(id))
+        .sort((a, b) => order[mine[a.id]] - order[mine[b.id]] || a.name.localeCompare(b.name, 'ko'));
+      for (const item of list) {
+        total++;
+        const c = res?.[item.key];
+        if (c && sum(c) > 0) {
+          compared++;
+          if (c[VERDICTS.findIndex(v => v.v === mine[item.id])] === Math.max(...c)) agree++;
+        }
+      }
+      if (!list.length) return null;
+      const templates = db.templates.filter(t => t.category.id === cat.id);
+      const editHref = templates.length === 1 ? `#/balance/${templates[0].id}` : `#/balance/c/${cat.id}`;
+      const pseudo = { tile: cat.tile, byId: cat.byId };
+      return h('section', { class: 'block' },
+        h('div', { class: 'my-sec-head' },
+          h('h2', { class: 'block-title' }, cat.name, h('span', { class: 'my-sec-count' }, `${list.length}개`)),
+          h('a', { class: 'btn small', href: editHref }, '고치러 가기'),
+        ),
+        h('ol', { class: 'result-list my-list' }, list.map(item => {
+          const c = res?.[item.key];
+          const n = c ? sum(c) : 0;
+          return h('li', {
+            class: 'result', tabindex: '0', role: 'button', 'aria-label': `${item.name} 자세히`,
+            onclick: () => openDetail(item, cat, db),
+            onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(item, cat, db); } },
+          },
+            tile(item, pseudo),
+            h('div', { class: 'result-main' },
+              h('div', { class: 'result-name' }, item.name,
+                item.groupName && h('span', { class: 'result-group' }, item.groupName)),
+              myChip(VERDICTS, mine[item.id], c),
+              n > 0 ? h('div', { class: 'bar small', role: 'img', 'aria-label': VERDICTS.map((v, i) => `${v.sub} ${pct(c[i], n)}%`).join(', ') },
+                VERDICTS.map((v, i) => c[i] > 0 && h('span', { style: { flexGrow: c[i], background: v.color } }, pct(c[i], n) >= 14 ? `${pct(c[i], n)}%` : '')))
+                : h('div', { class: 'result-legend' }, res ? '아직 다른 표가 없습니다' : '모두의 결과를 불러오지 못했습니다'),
+              n > 0 && h('div', { class: 'result-legend' }, h('span', { class: 'n' }, `모두 ${n}표`)),
+            ),
+          );
+        })),
+      );
+    });
+
+    const VERDICTS = verdictsFor('');
+    render(
+      crumbs('balance', ['내 투표']),
+      h('header', { class: 'page-head' },
+        h('h1', {}, '내 투표'),
+        h('p', {}, '이 기기에서 제출한 표입니다. 항목을 누르면 자세히 볼 수 있습니다.'),
+      ),
+      h('div', { class: 'my-summary' },
+        h('div', { class: 'my-stat' }, h('strong', {}, String(total)), h('span', {}, '제출한 표')),
+        compared > 0 && h('div', { class: 'my-stat' }, h('strong', {}, `${pct(agree, compared)}%`), h('span', {}, `다수 의견과 같음 (${agree}/${compared})`)),
+        pending > 0 && h('div', { class: 'my-stat warn' }, h('strong', {}, String(pending)), h('span', {}, '제출하지 않은 변경')),
+      ),
+      h('div', { class: 'seg my-filter', role: 'group', 'aria-label': '판정으로 거르기' },
+        h('button', { class: filter === 'all' ? 'on' : null, onclick: () => { filter = 'all'; draw(); } }, '전체'),
+        VERDICTS.map(v => h('button', { class: filter === v.v ? 'on' : null, onclick: () => { filter = v.v; draw(); } }, v.label)),
+      ),
+      sections,
+      h('p', { class: 'help' }, '표는 이 브라우저에만 기록됩니다. 다른 기기나 브라우저에서는 보이지 않습니다.'),
+    );
   }
 
   draw();
