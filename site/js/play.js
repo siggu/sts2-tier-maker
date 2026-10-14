@@ -9,6 +9,7 @@ import { authHeaders, currentUser } from './auth.js';
 import { loadState, DEFAULT_TIERS } from './tierlist.js';
 import { renderPng } from './export.js';
 import { mountWorldCup, hasRunningCup, sizesFor, SIZES } from './worldcup.js';
+import { worldcupSwitch, cupsStrip } from './cups.js';
 
 // ---------------------------------------------------------------- 공용
 
@@ -43,7 +44,9 @@ export function route(parts, params, ctx) {
 }
 
 export function navLinks(parts) {
-  return [h('a', { href: '#/versus', class: parts[0] === 'versus' ? 'active' : null }, t('vs.nav'))];
+  // 사용자 월드컵(#/cups, #/cup/…)도 같은 '월드컵' 메뉴
+  const on = parts[0] === 'versus' || parts[0] === 'cups' || parts[0] === 'cup';
+  return [h('a', { href: '#/versus', class: on ? 'active' : null }, t('vs.nav'))];
 }
 
 export function homeBlocks(mode) {
@@ -349,6 +352,7 @@ function viewVersusHome(ctx) {
         h('p', {}, t('vs.lead'))),
       session.picks > 0 ? sessionBadge() : null,
     ),
+    worldcupSwitch('game'),
     h('section', { class: 'block' },
       h('h2', { class: 'block-title' }, t('vs.pickCat')),
       h('div', { class: 'cat-grid' }, cats.map(cat => {
@@ -368,6 +372,7 @@ function viewVersusHome(ctx) {
         );
       })),
     ),
+    cupsStrip(ctx),
   );
 }
 

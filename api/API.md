@@ -19,11 +19,13 @@
 | `src/auth.js` | 구글 ID 토큰 검증, 세션. `getUser(request, env)` 를 내보낸다 |
 | `src/account.js` | `/auth/*`, `/me*`, `/gallery*`, `/comments*`, `/items/*/comments`, `/report` |
 | `src/play.js` | `/tiers/aggregate`, `/versus*` (월드컵) |
+| `src/cups.js` | `/images`, `/img/:id`, `/cups*` (사용자 월드컵) |
 | `migrations/0002_accounts.sql` | users, sessions, user_tiers, posts, reactions, comments, comment_likes, reports |
 | `migrations/0003_play.sql` | versus_votes, versus_ratings |
 | `migrations/0004_gallery_kind_worldcup.sql` | worldcup_stats (월드컵 부분) |
+| `migrations/0005_cups.sql` | cups, cup_items, cup_likes, images (사용자 월드컵) |
 
-`handleAccount` / `handlePlay` 는 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
+`handleAccount` / `handlePlay` / `handleCups` 는 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
 
 ## 설정 (wrangler.toml `[vars]`)
 
@@ -108,7 +110,7 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 | `POST /items/:category/:id/comments` `{ body }` 🔒 | `{ comment }` |
 | `DELETE /comments/:id` 🔒 | 작성자나 관리자 (내용을 지우고 deleted = 1) |
 | `POST /comments/:id/like` `{ on: bool }` 🔒 | `{ likes, myLike }` |
-| `POST /report` `{ kind: 'post'|'comment', id, reason? }` 🔒 | `{ ok }` |
+| `POST /report` `{ kind: 'post'|'comment'|'cup', id, reason? }` 🔒 | `{ ok }` (`cup` 은 사용자 월드컵) |
 
 `comment` = `{ id, body, author: { id, name, picture }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
 (덧붙임: `hidden: bool`. 지운 댓글은 목록에 나오지 않는다. 본문은 원문 그대로 저장·반환하므로 화면에서 이스케이프한다.)
@@ -139,6 +141,57 @@ versus_votes(category, a, b, voter, winner, ts, PRIMARY KEY(category, a, b, vote
 versus_ratings(category, item, rating REAL DEFAULT 1500, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, PRIMARY KEY(category, item))
 worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 0, PRIMARY KEY(category, item))   -- 0004
 ```
+
+## 사용자 월드컵 (cups.js)
+
+로그인한 사람이 이상형 월드컵을 만든다: 제목, 설명, 표지, 항목 4–64개(이름 + 이미지). 누구나 할 수 있고(대진은 화면이 짠다)
+한 판이 끝나면 결과를 한 번 보낸다. 좋아요·댓글·신고·작성자 수정(제목·설명·표지만)·삭제.
+
+**이미지 참조** (표지 `cover`, 항목 `img`, 미리보기 `sample` 모두 같은 문자열):
+- `'img:<32hex>'` — `POST /images` 로 올린 이미지 (`images` 표에 있어야 한다). 주소는 `GET /img/<32hex>`.
+- `'game:<카테고리>/<아이템id>'` — 게임 이미지 (`site/data/keys.json` 에 있는 키).
+- `null` — 이미지 없음 (화면이 기본 이미지를 그린다).
+
+| 요청 | 설명 |
+|---|---|
+| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. id = sha256(파일) 앞 32자리 hex — 같은 파일은 같은 id(오류 아님). IP 당 1분 20개, 한 사람이 하루에 새 이미지 300개. `{ id, ref: 'img:<id>' }` |
+| `GET /img/:id` | 이미지 바이트. `Content-Type` 은 올릴 때 형식, `Cache-Control: public, max-age=31536000, immutable`, `Access-Control-Allow-Origin: *`(canvas 에 그릴 수 있게), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cross-Origin-Resource-Policy: cross-origin`. 없으면 404. |
+| `POST /cups` 🔒 `{ title, description?, cover?, items: [{ name, img? }] }` | 만들기 → `{ cup }`. 제목 2–60자(한 줄), 설명 0–300자(줄바꿈 가능), 항목 4–64개, 항목 이름 1–80자(한 줄). `cover`·`img` 는 빼면 `null`. 항목 id 는 서버가 순서대로 `'i1'…'iN'`. 사용자당 1분 3개, 하루 10개(`reason: 'daily'`). |
+| `GET /cups?sort=new|top&cursor=&author=` | `{ cups: [cup], next }` (20개씩). `sort` 기본 `new`. `top` = 좋아요 → 판 수 → 최신 순. `author` 는 users.id. 숨겨진 월드컵은 작성자·관리자에게만. |
+| `GET /cups/:id` | `{ cup, items: [{ id, name, img, champ, entries, wins, losses }] }` (항목 순서대로). 숨겨진 월드컵은 작성자·관리자 아니면 404. |
+| `PATCH /cups/:id` 🔒 `{ title?, description?, cover? }` | 작성자나 관리자. 준 필드만 바꾼다(항목은 못 바꾼다). `{ cup }` |
+| `DELETE /cups/:id` 🔒 | 작성자나 관리자. 항목·좋아요·댓글(+댓글 좋아요·신고)·월드컵 신고를 같이 지운다. 올린 이미지는 남긴다. `{ ok: true }` |
+| `POST /cups/:id/play` `{ champion, entrants, matches, voter? }` | 한 판의 결과 → `{ ok: true }`. 아래 규칙. 로그인 상태면 계정, 아니면 익명 `voter`(형식은 `/balance` 와 같음, 저장하지는 않음). IP 당 1분 6판(`cupplay` 버킷). `plays + 1`, 출전 항목 `entries + 1`, 우승 항목 `champ + 1`, 경기마다 이긴 쪽 `wins + 1`·진 쪽 `losses + 1`. |
+| `POST /cups/:id/like` 🔒 `{ on: bool }` | `{ likes, myLike }`. 사용자당 1분 60번. |
+| `GET /cups/:id/comments` | `{ comments: [comment] }` (오래된 순, 최대 200) — 갤러리 글 댓글과 같은 모양 |
+| `POST /cups/:id/comments` 🔒 `{ body }` | `{ comment }`. 본문 1–500자, 1분에 5개(모든 댓글 합산). 댓글 좋아요·삭제·신고는 기존 `/comments/:id/like`, `DELETE /comments/:id`, `POST /report { kind: 'comment' }`. |
+
+`cup` = `{ id, title, description, cover, itemCount, plays, likes, comments, author: { id, name, picture }, created, sample, myLike: bool, hidden: bool, mine: bool }`
+- `sample` = 항목 이미지 참조 4개 (이미지 있는 항목 먼저, 항목 순서대로; 모자라면 `null` 로 채운다).
+- `comments` = 지워지지도 숨겨지지도 않은 댓글 수 (댓글 쓰기·지우기·신고 숨김 때 다시 센다).
+- `next` 는 다음 쪽 `cursor` 로 그대로 넘기는 문자열, 끝이면 `null`.
+
+`play` 규칙 (틀리면 400 `reason`):
+- `entrants`: 서로 다른 이 월드컵의 항목 id, 개수 4·8·16·32·64 이고 항목 수 이하 (`entrants` / 없는 id `item` / 겹침 `duplicate`).
+- `matches`: `[이긴 id, 진 id]` 를 치른 순서대로, 정확히 `entrants.length − 1` 개 (`matches`). 두 id 는 출전 항목이고 서로 다르며,
+  한 번 진 항목은 그 뒤 경기에 나오지 않는다 (`match`).
+- `champion` = 마지막 경기의 승자 (`champion`). 로그인하지 않았고 `voter` 가 틀리면 `voter`
+  (`Authorization` 을 보냈는데 세션이 틀리면 401 `auth`). 본문이 JSON 이 아니면 `json`.
+
+신고: `POST /report { kind: 'cup', id }` — 3명이 신고하면 `hidden = 1` (목록·상세·댓글·한 판에서 빠짐, 작성자·관리자에게는 보임).
+
+400 `reason` (만들기·고치기): `json`, `title`, `description`, `cover`(형식이 틀렸거나 올리지 않은 이미지), `items`(배열이 아니거나 4–64개 밖),
+`item`·`name`·`img` (이때 `index` = 문제 항목 위치, 0부터. `img` 는 형식이 틀렸거나 올리지 않은 이미지).
+이미지: `type`(지원하지 않는 Content-Type), `image`(비었거나 내용이 형식과 다름), 413 `too_large`(300KB 초과).
+목록: `sort`, `author`, `cursor`. 좋아요: `on`. 없는 월드컵·이미지·형식이 틀린 id 는 404, 남의 월드컵 고치기·지우기는 403.
+
+```sql
+cups(id TEXT PK, user_id, title, description, cover, item_count, sample TEXT(JSON), plays, likes, comments, hidden, created)
+cup_items(cup_id, id, pos, name, img, champ, entries, wins, losses, PRIMARY KEY(cup_id, id))   -- id = 'i' || pos
+cup_likes(cup_id, user_id, PRIMARY KEY(cup_id, user_id))
+images(id TEXT PK, user_id, type, bytes BLOB, size, created)                                   -- id = sha256 앞 32 hex
+```
+댓글은 `comments` 표에 `target = 'cup:<id>'`, 신고는 `reports` 표에 `kind = 'cup'`.
 
 ## 오류 코드·제한 (account.js 구현 기준)
 

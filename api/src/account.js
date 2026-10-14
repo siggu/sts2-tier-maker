@@ -28,7 +28,7 @@ export const BALANCE_ROWS = [
   { label: 'buff', color: '#57a7d8' },
 ];
 // 제어 문자와 글자 방향 바꾸기 문자(이름·댓글로 화면을 속이지 못하게). 줄바꿈은 따로 다룬다.
-const UNSAFE_CHARS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩﻿]/g;
+export const UNSAFE_CHARS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩﻿]/g;
 
 const len = s => [...s].length; // 글자 수 = 코드 포인트 수 (이모지·한글이 1자)
 
@@ -455,11 +455,15 @@ async function reactPost(c, id) {
 
 // ---------- 댓글 ----------
 
-// 글의 댓글 수 = 지워지지도 숨겨지지도 않은 댓글
-function recountPostComments(env, postId) {
+// 댓글 수 = 지워지지도 숨겨지지도 않은 댓글. 수를 들고 있는 대상(글·사용자 월드컵)이면 다시 세는 문장, 아니면 null.
+const COUNTED_TARGETS = { post: 'posts', cup: 'cups' };
+function recountComments(env, target) {
+  const i = target.indexOf(':');
+  const table = COUNTED_TARGETS[target.slice(0, i)];
+  if (!table) return null;
   return env.DB.prepare(
-    `UPDATE posts SET comments = (SELECT COUNT(*) FROM comments WHERE target = ?2 AND deleted = 0 AND hidden = 0) WHERE id = ?1`
-  ).bind(postId, `post:${postId}`);
+    `UPDATE ${table} SET comments = (SELECT COUNT(*) FROM comments WHERE target = ?2 AND deleted = 0 AND hidden = 0) WHERE id = ?1`
+  ).bind(target.slice(i + 1), target);
 }
 
 function commentOut(r, user) {
@@ -476,8 +480,8 @@ function commentOut(r, user) {
   };
 }
 
-// item 이 있으면 작성자가 그 항목에 낸 밸런스 표(vote)를 같이 읽는다
-async function listComments(c, target, { item = null, order }) {
+// item 이 있으면 작성자가 그 항목에 낸 밸런스 표(vote)를 같이 읽는다. cups.js 도 쓴다.
+export async function listComments(c, target, { item = null, order }) {
   const me = c.user?.id ?? '';
   const visible = c.user?.admin ? '' : 'AND (c.hidden = 0 OR c.user_id = ?3)';
   const { results } = await c.env.DB.prepare(
@@ -492,7 +496,7 @@ async function listComments(c, target, { item = null, order }) {
   return c.send({ comments: results.map(r => commentOut(r, c.user)) });
 }
 
-async function addComment(c, target, item = null) {
+export async function addComment(c, target, item = null) {
   const { env, user } = c;
   if (await limited(c, 'comment')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, SMALL_BODY_BYTES);
@@ -506,7 +510,8 @@ async function addComment(c, target, item = null) {
     env.DB.prepare('INSERT INTO comments (id, target, user_id, body, created) VALUES (?1, ?2, ?3, ?4, ?5)')
       .bind(id, target, user.id, text, now),
   ];
-  if (target.startsWith('post:')) stmts.push(recountPostComments(env, target.slice(5)));
+  const recount = recountComments(env, target);
+  if (recount) stmts.push(recount);
   await env.DB.batch(stmts);
 
   let vote = null;
@@ -562,7 +567,8 @@ async function deleteComment(c, id) {
   if (!row) return notFound(c);
   if (!canModify(row, c.user)) return c.send({ error: 'forbidden' }, 403);
   const stmts = [env.DB.prepare(`UPDATE comments SET body = '', deleted = 1 WHERE id = ?1`).bind(id)];
-  if (row.target.startsWith('post:')) stmts.push(recountPostComments(env, row.target.slice(5)));
+  const recount = recountComments(env, row.target);
+  if (recount) stmts.push(recount);
   await env.DB.batch(stmts);
   return c.send({ ok: true });
 }
@@ -588,13 +594,21 @@ async function likeComment(c, id) {
 
 // ---------- 신고 ----------
 
+// 신고할 수 있는 것과 그 표. 'cup' 은 사용자 월드컵 (cups.js, 0005).
+const REPORT_TABLES = { post: 'posts', comment: 'comments', cup: 'cups' };
+
+async function findCupRow(c, id) {
+  const row = await c.env.DB.prepare('SELECT id, user_id, hidden FROM cups WHERE id = ?1').bind(id).first();
+  return row && canSee(row, c.user) ? row : null;
+}
+
 async function report(c) {
   const { env, user } = c;
   if (await limited(c, 'report')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, SMALL_BODY_BYTES);
   if (res) return res;
   const { kind, id } = body;
-  if (kind !== 'post' && kind !== 'comment') return bad(c, 'kind');
+  if (!Object.hasOwn(REPORT_TABLES, kind)) return bad(c, 'kind');
   if (typeof id !== 'string' || !ID_RE.test(id)) return bad(c, 'id');
   let reason = null;
   if (body.reason !== undefined && body.reason !== null && body.reason !== '') {
@@ -602,11 +616,11 @@ async function report(c) {
     if (!reason || len(reason) > 200) return bad(c, 'reason');
   }
 
-  const row = kind === 'post' ? await findPost(c, id) : await findComment(c, id);
+  const row = kind === 'post' ? await findPost(c, id) : kind === 'cup' ? await findCupRow(c, id) : await findComment(c, id);
   if (!row) return notFound(c);
 
   // 신고를 넣고, 같은 대상 신고가 REPORTS_TO_HIDE 건이면 숨긴다 (한 batch 라 동시에 와도 수가 맞다)
-  const table = kind === 'post' ? 'posts' : 'comments';
+  const table = REPORT_TABLES[kind];
   const stmts = [
     env.DB.prepare('INSERT OR IGNORE INTO reports (kind, target_id, user_id, reason, created) VALUES (?1, ?2, ?3, ?4, ?5)')
       .bind(kind, id, user.id, reason, Date.now()),
@@ -615,7 +629,8 @@ async function report(c) {
        AND (SELECT COUNT(*) FROM reports WHERE kind = ?2 AND target_id = ?1) >= ?3`
     ).bind(id, kind, REPORTS_TO_HIDE),
   ];
-  if (kind === 'comment' && row.target.startsWith('post:')) stmts.push(recountPostComments(env, row.target.slice(5)));
+  const recount = kind === 'comment' && recountComments(env, row.target);
+  if (recount) stmts.push(recount);
   await env.DB.batch(stmts);
   return c.send({ ok: true });
 }

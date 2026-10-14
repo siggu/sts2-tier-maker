@@ -42,7 +42,7 @@ const ICONS = {
   grid: 'M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z',
   caret: 'M7 10l5 5 5-5z',
 };
-function icon(name) {
+export function icon(name) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');
@@ -67,13 +67,13 @@ function ago(ts) {
   for (const [unit, s] of STEPS) if (Math.abs(sec) >= s) return rtf.format(Math.round(sec / s), unit);
   return t('acct.justNow');
 }
-function timeEl(ts) {
+export function timeEl(ts) {
   const ms = toMs(ts);
   return h('time', { class: 'acct-time', datetime: new Date(ms).toISOString(), title: dtf.format(ms) }, ago(ts));
 }
 
 // 프로필 사진(구글) — 없거나 깨지면 이름 첫 글자
-function avatar(user, cls = '') {
+export function avatar(user, cls = '') {
   const name = String(user?.name || '?').trim();
   const initial = ([...name][0] || '?').toUpperCase();
   let hue = 0;
@@ -860,7 +860,8 @@ async function viewPost(postId, ctx) {
 
 // ================================================================ 신고
 
-async function reportDialog(kind, id, postKind = 'tier') {
+// (사용자 월드컵 cups.js 도 쓴다: kind 'cup', lead 로 안내 문구를 넘긴다)
+export async function reportDialog(kind, id, postKind = 'tier', lead = null) {
   if (!(await requireLogin(t('acct.reason.report')))) return;
   const REASONS = ['spam', 'abuse', 'inappropriate', 'other'];
   const detail = h('textarea', { rows: '3', maxlength: String(LIMITS.report), placeholder: t('acct.report.detailPlaceholder') });
@@ -879,7 +880,7 @@ async function reportDialog(kind, id, postKind = 'tier') {
       send.disabled = false;
     }
   } },
-    h('p', { class: 'acct-help' }, kind === 'post' ? t(postKind === 'balance' ? 'acct.report.leadBalance' : 'acct.report.leadPost') : t('acct.report.leadComment')),
+    h('p', { class: 'acct-help' }, lead || (kind === 'post' ? t(postKind === 'balance' ? 'acct.report.leadBalance' : 'acct.report.leadPost') : t('acct.report.leadComment'))),
     h('fieldset', { class: 'acct-radios' },
       h('legend', { class: 'sr-only' }, t('acct.report.reason')),
       REASONS.map((r, i) => h('label', {}, h('input', { type: 'radio', name: 'reason', value: r, checked: i === 0 }), h('span', {}, t(`acct.report.r.${r}`))))),
@@ -894,7 +895,8 @@ async function reportDialog(kind, id, postKind = 'tier') {
 // ================================================================ 댓글
 
 // listPath: 목록 GET, postPath: 쓰기 POST. verdicts 가 있으면 작성자의 밸런스 표 배지를 단다.
-function commentsSection({ listPath, postPath, verdicts = null, sortable = false, formFirst = false, count = null, onCount, lazy = false }) {
+// (사용자 월드컵 cups.js 도 쓴다)
+export function commentsSection({ listPath, postPath, verdicts = null, sortable = false, formFirst = false, count = null, onCount, lazy = false }) {
   let sort = 'new';
   let comments = [];
   let loaded = false;

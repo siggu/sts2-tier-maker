@@ -12,8 +12,10 @@
 //     mini: item => Node,                        // 우승까지의 길·준우승에 쓰는 작은 그림
 //     onDetail: item => {},                      // 있으면 '자세히' 단추
 //     onMatch: ({ winner, loser, size }) => {},  // 한 경기 끝날 때마다
-//     onFinish: ({ champion, runnerUp, entrants, size }) => {},  // 판이 끝날 때 한 번
+//     onFinish: ({ champion, runnerUp, entrants, size, matches }) => {},  // 판이 끝날 때 한 번
+//                                                // matches = [[이긴 id, 진 id], …] (경기 순서, size − 1 개)
 //     onRank: () => {},                          // 있으면 우승 화면에 '순위 보기'
+//     imgFallback: item => url | null,           // 그림을 못 불러올 때 대신 쓸 그림 (사용자 월드컵의 기본 이미지)
 //   });
 //   target.replaceChildren(cup.el);  …  cup.destroy();
 //
@@ -192,6 +194,7 @@ export function mountWorldCup(opts) {
       opts.onFinish?.({
         champion: byId.get(state.champion), runnerUp: byId.get(state.runnerUp),
         entrants: [...run.entrants], size: run.size,
+        matches: state.matches.map(x => [x.w, x.w === x.a ? x.b : x.a]),
       });
     }
     draw(state.done);
@@ -207,6 +210,14 @@ export function mountWorldCup(opts) {
   }
 
   // ---- 화면 ----
+
+  // 항목 그림. 못 불러오면 imgFallback 의 그림으로 한 번 바꾼다.
+  function pic(item, attrs) {
+    const el = h('img', { src: item.img, alt: '', ...attrs });
+    const fb = opts.imgFallback?.(item);
+    if (fb && fb !== item.img) el.addEventListener('error', () => { el.src = fb; }, { once: true });
+    return el;
+  }
 
   function drawPicker() {
     if (!sizes.length) {
@@ -239,7 +250,7 @@ export function mountWorldCup(opts) {
         onclick: () => pick(i),
       },
         h('span', { class: `vs-media kind-${kind}` },
-          item.img ? h('img', { src: item.img, alt: '', decoding: 'async', draggable: 'false' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, Array.from(item.name || '?')[0])),
+          item.img ? pic(item, { decoding: 'async', draggable: 'false' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, Array.from(item.name || '?')[0])),
         h('span', { class: 'vs-name' }, item.name),
         opts.extra?.(item) ?? null,
         h('span', { class: 'vs-key kbd-only', 'aria-hidden': 'true' }, i ? '→' : '←'),
@@ -290,7 +301,7 @@ export function mountWorldCup(opts) {
   }
 
   const mini = item => (opts.mini ? opts.mini(item)
-    : h('span', { class: 'cup-mini' }, item.img ? h('img', { src: item.img, alt: '', loading: 'lazy' }) : Array.from(item.name || '?')[0]));
+    : h('span', { class: 'cup-mini' }, item.img ? pic(item, { loading: 'lazy' }) : Array.from(item.name || '?')[0]));
 
   function drawChampion() {
     const champ = byId.get(state.champion);
@@ -301,7 +312,7 @@ export function mountWorldCup(opts) {
       h('h2', { class: 'cup-champ-title' }, h('span', { 'aria-hidden': 'true' }, '🏆 '), t('wc.champion')),
       h('div', { class: `cup-champ-card kind-${kind}` },
         h('span', { class: `vs-media kind-${kind}` },
-          champ.img ? h('img', { src: champ.img, alt: '', decoding: 'async' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, Array.from(champ.name || '?')[0])),
+          champ.img ? pic(champ, { decoding: 'async' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, Array.from(champ.name || '?')[0])),
         h('span', { class: 'vs-name cup-champ-name' }, champ.name),
         opts.extra?.(champ) ?? null,
         opts.onDetail ? h('button', { class: 'btn ghost small', onclick: () => opts.onDetail(champ) }, t('wc.detail')) : null,
@@ -332,7 +343,7 @@ export function mountWorldCup(opts) {
 
   async function saveImage(champ, runner) {
     try {
-      const blob = await championImage({ title: opts.title, size: run.size, champ, runner });
+      const blob = await championImage({ title: opts.title, size: run.size, champ, runner, fallback: opts.imgFallback?.(champ) });
       const url = URL.createObjectURL(blob);
       const name = `${opts.title || 'worldcup'} - ${champ.name}`.replace(/[\\/:*?"<>|]/g, '_');
       const a = h('a', { href: url, download: `${name}.png` });
@@ -397,7 +408,7 @@ function loadImage(src) {
   });
 }
 
-async function championImage({ title, size, champ, runner }) {
+async function championImage({ title, size, champ, runner, fallback }) {
   const W = 720, H = 900;
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
@@ -422,7 +433,7 @@ async function championImage({ title, size, champ, runner }) {
   g.font = `500 22px ${font}`;
   g.fillText(t('wc.champKicker', { size: t('wc.size', { n: size }) }), W / 2, 178, W - 80);
 
-  const img = await loadImage(champ.img);
+  const img = (await loadImage(champ.img)) || (fallback ? await loadImage(fallback) : null);
   const box = { x: 90, y: 210, w: W - 180, h: 500 };
   if (img) {
     const s = Math.min(box.w / img.naturalWidth, box.h / img.naturalHeight);
