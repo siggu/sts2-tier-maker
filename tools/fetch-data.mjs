@@ -106,19 +106,38 @@ function image(file, category, id, { height, width, trim = false } = {}) {
   return rel;
 }
 
+// 대소문자·공백·하이픈·밑줄을 무시한 비교용 키. 위키 데이터의 Image 값이 실제 파일 이름과
+// 'Flick-Flack' ↔ 'FlickFlack', 'CloakandDagger' ↔ 'CloakAndDagger' 처럼 조금씩 다른 경우가 있다.
+export const looseKey = name => String(name).toLowerCase().replace(/[^a-z0-9.]/g, '');
+
+async function queryJson(params) {
+  const qs = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', ...params });
+  return JSON.parse(await get(`${WIKI}/api.php?${qs}`));
+}
+
+// prefix 로 시작하는 위키 파일 전체를 { 느슨한 키 → { url, sha1, name } } 로 모은다.
+async function listFiles(prefix) {
+  const out = new Map();
+  let cont = {};
+  for (let i = 0; i < 40; i++) {
+    const r = await queryJson({ list: 'allimages', aiprefix: prefix, ailimit: '500', aiprop: 'url|sha1', ...cont });
+    for (const f of r.query.allimages) out.set(looseKey(f.name), { url: f.url, sha1: f.sha1, name: f.name });
+    if (!r.continue) break;
+    cont = r.continue;
+    await sleep(500);
+  }
+  return out;
+}
+
 // 위키 API 로 파일 50개씩 묶어 실제 이미지 주소(CDN)와 sha1 을 받는다.
 // 이미지마다 위키에 요청하면 429 로 막히므로, 위키 요청은 이 묶음 조회만 한다.
+// 정확히 일치하는 파일이 없으면 같은 접두어의 파일 목록에서 느슨한 키로 찾는다.
 export async function resolveFiles(files) {
   const out = new Map();
   const list = [...new Set(files)];
   for (let i = 0; i < list.length; i += 50) {
     const chunk = list.slice(i, i + 50);
-    const qs = new URLSearchParams({
-      action: 'query', format: 'json', formatversion: '2',
-      prop: 'imageinfo', iiprop: 'url|sha1',
-      titles: chunk.map(f => `File:${f}`).join('|'),
-    });
-    const r = JSON.parse(await get(`${WIKI}/api.php?${qs}`));
+    const r = await queryJson({ prop: 'imageinfo', iiprop: 'url|sha1', titles: chunk.map(f => `File:${f}`).join('|') });
     const norm = new Map((r.query.normalized || []).map(n => [n.from, n.to]));
     const pages = new Map((r.query.pages || []).map(p => [p.title, p]));
     for (const f of chunk) {
@@ -127,6 +146,18 @@ export async function resolveFiles(files) {
       if (info?.url) out.set(f, { url: info.url, sha1: info.sha1 });
     }
     await sleep(500);
+  }
+
+  const missing = list.filter(f => !out.has(f));
+  const prefixes = [...new Set(missing.map(f => f.replace(/ /g, '_').split(/[-_]/)[0]))];
+  const known = new Map();
+  for (const prefix of prefixes) for (const [k, v] of await listFiles(prefix)) known.set(k, v);
+  for (const f of missing) {
+    const hit = known.get(looseKey(f));
+    if (hit) {
+      out.set(f, { url: hit.url, sha1: hit.sha1 });
+      console.log(`  파일 이름 보정: ${f} → ${hit.name}`);
+    }
   }
   return out;
 }
