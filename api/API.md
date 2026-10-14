@@ -70,6 +70,8 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 `iss` ∈ {`accounts.google.com`, `https://accounts.google.com`}, `aud` = `GOOGLE_CLIENT_ID`, `exp` 가 지나지 않음.
 
 `POST /balance` (index.js): 로그인 상태면 `body.voter` 대신 `'u_' + user.id` 를 쓰고, IP 당 voter 수 제한은 건너뛴다.
+익명 voter 는 `'u_'` 로 시작할 수 없다(계정 표 자리, 400 `voter`). `Authorization` 을 보냈는데 세션이 틀리고 `voter` 도 없으면 `401 { error: 'auth' }`
+— 화면은 로그인 상태여도 익명 `voter` 를 같이 보내 두면 세션이 끝나도 익명 표로 들어간다.
 
 ## 갤러리 (account.js)
 
@@ -82,6 +84,7 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 | `POST /gallery/:id/react` `{ v: 1 | -1 | 0 }` 🔒 | 0 은 취소. `{ likes, dislikes, myReaction }` |
 
 `post` = `{ id, template, title, state, author: { id, name, picture }, created, likes, dislikes, comments, myReaction: 1|-1|0 }`
+(덧붙임: `hidden: bool` — 숨겨진 글은 작성자·관리자에게만 오며 그때 `true`. `next` 는 다음 쪽 `cursor` 로 그대로 넘기는 문자열, 끝이면 `null`.)
 (목록에서도 `state` 를 포함한다 — 미리보기 썸네일용.)
 
 ## 댓글 (account.js)
@@ -97,6 +100,7 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 | `POST /report` `{ kind: 'post'|'comment', id, reason? }` 🔒 | `{ ok }` |
 
 `comment` = `{ id, body, author: { id, name, picture }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
+(덧붙임: `hidden: bool`. 지운 댓글은 목록에 나오지 않는다. 본문은 원문 그대로 저장·반환하므로 화면에서 이스케이프한다.)
 — `vote` 는 항목 댓글에서 작성자가 그 항목에 낸 밸런스 표(없으면 null). 본문 1–500자, 1분에 5개까지.
 
 ## 모두의 티어표 (play.js)
@@ -119,3 +123,22 @@ Elo: 시작 1500, K = 24. 같은 쌍 재투표로 결과가 바뀌면 앞선 결
 versus_votes(category, a, b, voter, winner, ts, PRIMARY KEY(category, a, b, voter))   -- a < b 로 정렬해 저장
 versus_ratings(category, item, rating REAL DEFAULT 1500, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, PRIMARY KEY(category, item))
 ```
+
+## 오류 코드·제한 (account.js 구현 기준)
+
+| 상태 | `error` | 언제 |
+|---|---|---|
+| 400 | `bad_request` | `reason`: `json`, `credential`, `name`, `template`, `title`, `empty`(배치한 항목 없는 글), `state`·`state.title`·`state.tiers`·`state.label`·`state.color`·`state.items`·`state.updatedAt`, `too_many_tiers`(동기화 300개 초과), `sort`, `cursor`, `author`, `v`, `on`, `body`, `kind`, `id`, `reason`(신고 사유 200자 초과) |
+| 401 | `auth` | 세션 없음·틀림·만료. `/auth/google` 에서는 `reason`: `format`·`alg`·`kid`·`signature`·`iss`·`aud`·`exp`·`iat`·`sub` |
+| 403 | `forbidden` | 남의 글·댓글 지우기 |
+| 404 | `not_found` | 없는 글·댓글·항목, 숨겨진 글(작성자·관리자 아님) |
+| 405 | `method_not_allowed` | 경로는 있으나 메서드가 다름 |
+| 413 | `too_large` | 요청 본문 32KB(티어표·글) / 8KB(그 밖) 초과, 티어표 state 24KB 초과 |
+| 429 | `rate_limited` | 1분당: 로그인 10(IP), 이름 10, 티어표 저장 60, 글 5, 반응 60, 댓글 5, 댓글 좋아요 60, 신고 10(사용자). 글은 하루 20개(`reason: 'daily'`) |
+| 503 | `login_disabled` | `GOOGLE_CLIENT_ID` 가 비어 있음 |
+
+- 세션 토큰은 43자 base64url, 30일 뒤 만료(연장 없음). 로그아웃은 언제나 `{ ok: true }`.
+- 처음 로그인하면 이름은 구글 이름 앞 20자(2자 미만이면 `player-xxxx`). 다시 로그인하면 사진만 갱신한다.
+- 사용자 표시 이름·제목·댓글에서 제어 문자와 글자 방향 바꾸기 문자는 지운다. 그 밖의 문자(`<` 등)는 그대로 저장한다.
+- 로컬 시험: `TEST_JWKS`(JWKS JSON 문자열) 변수가 있고 요청 주소가 `localhost`/`127.0.0.1` 일 때만 구글 JWKS 대신 그 키로 ID 토큰을 검증한다
+  (`RUN_E2E=1 node --test test/e2e.test.js` 가 이렇게 띄운다). 배포 주소에서는 설정돼 있어도 쓰지 않는다.

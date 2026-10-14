@@ -31,7 +31,8 @@
    "skill": "스킬",
    "status": "상태이상"
   },
-  "actNumber": "{actNumber}막"
+  "actNumber": "{actNumber}막",
+  "period": "."
  },
  "cards": {
   "abrasive": {

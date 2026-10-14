@@ -130,9 +130,10 @@ async function madScience() {
 // 게임 화면의 희귀도·카드 종류 이름
 async function terms() {
   const ko = await load('kor', 'gameplay_ui');
+  const kw = await load('kor', 'card_keywords');
   const pick = prefix => Object.fromEntries(Object.entries(ko)
     .filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k.slice(prefix.length).toLowerCase(), v]));
-  return { rarity: pick('CARD_RARITY.'), relicRarity: pick('RELIC_RARITY.'), type: pick('CARD_TYPE.'), actNumber: ko.ACT_NUMBER };
+  return { rarity: pick('CARD_RARITY.'), relicRarity: pick('RELIC_RARITY.'), type: pick('CARD_TYPE.'), actNumber: ko.ACT_NUMBER, period: kw.PERIOD };
 }
 
 // 고대의 존재 이름 → 칭호 (예: neow → 부활의 어머니 (추방자))

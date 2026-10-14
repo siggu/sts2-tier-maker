@@ -266,7 +266,7 @@ async function flushVotes() {
       const body = { category: vote.category, winner: vote.winner, loser: vote.loser };
       // 로그인 상태면 서버가 계정으로 센다. 아니면 밸런스 투표와 같은 익명 id.
       if (!currentUser()) body.voter = voterId();
-      let status = 0;
+      let status = 0, result = null;
       try {
         const res = await fetch(`${API_BASE}/versus`, {
           method: 'POST',
@@ -275,6 +275,7 @@ async function flushVotes() {
           keepalive: true,
         });
         status = res.status;
+        if (res.ok) result = await res.json().catch(() => null);
       } catch { status = 0; }
       if (status === 0 || status >= 500 || status === 429) {
         // 연결 실패·서버 오류·너무 빠름: 잠시 뒤 다시
@@ -286,7 +287,7 @@ async function flushVotes() {
       const now = read(PENDING_KEY, []);
       now.shift();
       write(PENDING_KEY, now);
-      rankingCache.delete(vote.category);
+      if (result?.ratings) applyResult(vote, result.ratings);
     }
   } finally {
     flushing = false;
@@ -294,6 +295,19 @@ async function flushVotes() {
 }
 
 if (read(PENDING_KEY, []).length) setTimeout(flushVotes, 2500);
+
+// 서버 순위는 30초 캐시라 다시 받지 않고, 응답의 새 점수로 받아 둔 순위를 고친다.
+// (같은 쌍을 다시 고른 경우 서버는 승패를 다시 세므로 여기서는 승패를 더하지 않는다.)
+function applyResult(vote, ratings) {
+  const hit = rankingCache.get(vote.category);
+  if (!hit) return;
+  const items = hit.items;
+  for (const [id, delta] of [[vote.winner, 'wins'], [vote.loser, 'losses']]) {
+    const r = items[id] || (items[id] = { rating: 1500, wins: 0, losses: 0 });
+    if (Number.isFinite(Number(ratings[id]))) r.rating = Number(ratings[id]);
+    if (!vote.again) r[delta] = (Number(r[delta]) || 0) + 1;
+  }
+}
 
 async function fetchRanking(catId, signal) {
   const hit = rankingCache.get(catId);
@@ -375,6 +389,7 @@ function makePairs(buckets, scope, catId) {
       session.seen[scope] = [...seen].slice(-5000);
       saveSession();
     },
+    judged(pair) { return judged.has(pairKey(pair[0].id, pair[1].id)); },
     judge(pair) { const k = pairKey(pair[0].id, pair[1].id); judged.add(k); addJudged(catId, k); },
     reset() { seen.clear(); shown.clear(); delete session.seen[scope]; saveSession(); },
     get size() { return totalPairs; },
@@ -498,7 +513,7 @@ function viewVersus(catId, params, ctx) {
   function choose(side) {
     if (!current) return;
     const winner = current[side], loser = current[1 - side];
-    queueVote({ category: cat.id, winner: winner.id, loser: loser.id });
+    queueVote({ category: cat.id, winner: winner.id, loser: loser.id, again: pairs.judged(current) || undefined });
     pairs.judge(current);
     session.picks++;
     saveSession();

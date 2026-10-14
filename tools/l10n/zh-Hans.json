@@ -31,7 +31,8 @@
    "skill": "技能",
    "status": "状态"
   },
-  "actNumber": "阶段{actNumber}"
+  "actNumber": "阶段{actNumber}",
+  "period": "。"
  },
  "cards": {
   "abrasive": {

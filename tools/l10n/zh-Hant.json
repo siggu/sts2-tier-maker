@@ -31,7 +31,8 @@
    "skill": "技能",
    "status": "狀態"
   },
-  "actNumber": "第 {actNumber} 幕"
+  "actNumber": "第 {actNumber} 幕",
+  "period": "。"
  },
  "cards": {
   "abrasive": {

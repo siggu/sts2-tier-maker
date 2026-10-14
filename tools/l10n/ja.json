@@ -31,7 +31,8 @@
    "skill": "スキル",
    "status": "状態異常"
   },
-  "actNumber": "第{actNumber}層"
+  "actNumber": "第{actNumber}層",
+  "period": "。"
  },
  "cards": {
   "abrasive": {

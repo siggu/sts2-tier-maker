@@ -87,7 +87,7 @@ function localize(lang, table, enName, wikiText, { keywords = false, upgradable 
     // 게임 효과 문구가 비어 있고 위키 문구가 키워드뿐인 카드(저주 등): 키워드 이름만 옮긴다
     const split = splitKeywords(wikiText);
     if (split.keywords.length && !split.text.replace(/<br\s*\/?>/gi, '').trim()) {
-      out.text = withKeywords('', split.keywords, L10N[lang].keywords, false, false);
+      out.text = withKeywords('', split.keywords, L10N[lang].keywords, false, false, L10N[lang].terms?.period);
       stats[lang].text++;
     }
   } else if (e.en && e.tr && wikiText) {
@@ -98,9 +98,10 @@ function localize(lang, table, enName, wikiText, { keywords = false, upgradable 
         const r = renderKoBoth(e.tr, vals, WORDS[lang]);
         const kw = split.keywords;
         const kwNames = L10N[lang].keywords;
-        out.text = withKeywords(r.text, kw, kwNames, false, false);
+        const period = L10N[lang].terms?.period;
+        out.text = withKeywords(r.text, kw, kwNames, false, false, period);
         if (upgradable && (r.textUp || kw.some(k => k.base !== k.up))) {
-          out.textUp = withKeywords(r.textUp || r.text, kw, kwNames, true, true);
+          out.textUp = withKeywords(r.textUp || r.text, kw, kwNames, true, true, period);
         }
         stats[lang].text++;
       } catch { /* 값이 모자라면 영어 효과 유지 */ }

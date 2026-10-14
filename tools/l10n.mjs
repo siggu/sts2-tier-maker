@@ -60,6 +60,9 @@ function parseConditional(body) {
   return { name: body.slice(0, i), on: args[0] ?? '', off: args[1] ?? '' };
 }
 
+// 중국어·일본어 글자와 전각 문장 부호 (한글은 들어가지 않는다)
+const CJK = '[\\u3000-\\u303f\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uff00-\\uffef]';
+
 const stripTags = s => s.replace(/\[\/?[a-z_]+(?:=[^\]]*)?\]/g, '');
 
 // 위키 문구 정리: $키워드 표시, <br>, 위키 틀 제거, 공백 하나로
@@ -195,6 +198,9 @@ function readToken(tok) {
     if (counted) return { n: counted[1], icon: counted[2] };
     const icons = s.match(/@[A-Z]{2}/g);
     if (icons) return { n: icons.length, icon: icons[0].slice(1) };
+    // "[1 card|2 cards]" 처럼 수 뒤에 단·복수 낱말이 붙은 묶음은 수만 쓴다
+    const counted2 = s.trim().match(/^([+-]?\d+(?:\.\d+)?)\s+[a-z]/i);
+    if (counted2) return { n: counted2[1] };
     return { n: s.trim().replace(/%$/, '') };
   };
   if (pair) return { base: one(pair[1]), up: one(pair[2]) };
@@ -304,6 +310,8 @@ export function renderKo(koTmpl, values, { upgraded = false, highlight = false, 
   let html = render(koTmpl);
   // 게임 서식 태그: [gold]키워드[/gold] → 강조, 나머지 색 태그는 걷어 낸다
   html = html.replace(/\[gold\]([\s\S]*?)\[\/gold\]/g, '<b>$1</b>').replace(/\[\/?[a-z_]+(?:=[^\]]*)?\]/g, '');
+  // 줄바꿈은 한 줄로 잇는다. 중국어·일본어 글자 뒤의 줄바꿈은 띄어 쓰지 않는다.
+  html = html.replace(new RegExp(`(${CJK})[ \\t]*\\n\\s*`, 'g'), '$1');
   return html.replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 
@@ -342,13 +350,14 @@ export function splitKeywords(raw) {
   return { text: s, keywords };
 }
 
-// 키워드를 한국어 이름으로 효과 앞뒤에 붙인다.
-export function withKeywords(html, keywords, koNames, upgraded, highlight) {
+// 키워드를 그 언어 이름으로 효과 앞뒤에 붙인다.
+// period: 게임의 문장 끝 기호(card_keywords PERIOD, 일본어·중국어는 '。'). '。' 뒤는 띄우지 않는다.
+export function withKeywords(html, keywords, koNames, upgraded, highlight, period = '.') {
   const pick = after => keywords
     .filter(k => k.after === after && (upgraded ? k.up : k.base))
     .map(k => {
-      const label = `<b>${escapeHtml(koNames[k.kw] || k.kw)}</b>.`;
+      const label = `<b>${escapeHtml(koNames[k.kw] || k.kw)}</b>${escapeHtml(period)}`;
       return highlight && upgraded && !k.base ? `<span class="up">${label}</span>` : label;
     });
-  return [...pick(false), html, ...pick(true)].filter(Boolean).join(' ');
+  return [...pick(false), html, ...pick(true)].filter(Boolean).join(period === '.' ? ' ' : '');
 }
