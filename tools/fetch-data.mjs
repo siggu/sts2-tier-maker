@@ -1,7 +1,7 @@
 // Slay the Spire Wiki(slaythespire.wiki.gg)의 StS2 데이터 모듈을 읽어
 // site/data/sts2.json, site/data/keys.json 과 이미지(site/data/img/...)를 만든다.
 //
-// 사용: node tools/fetch-data.mjs            (전체)
+// 사용: node tools/fetch-data.mjs            (전체, 이미 받은 이미지는 sha1 이 같으면 건너뜀)
 //       node tools/fetch-data.mjs --no-images (데이터만)
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -27,15 +27,23 @@ const charByEn = new Map(CHARACTERS.map(c => [c.en, c]));
 
 // ---------------------------------------------------------------- 가져오기
 
-async function get(url, { binary = false, tries = 4 } = {}) {
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 위키(wiki.gg)는 요청이 몰리면 429 를 준다. Retry-After 를 지키고 점점 길게 기다렸다가 다시 시도한다.
+async function get(url, { binary = false, tries = 7 } = {}) {
   for (let i = 0; ; i++) {
+    let wait = Math.min(60_000, 2_000 * 2 ** i);
     try {
       const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(30_000) });
-      if (!res.ok) throw new Error(`${res.status} ${url}`);
-      return binary ? Buffer.from(await res.arrayBuffer()) : await res.text();
+      if (res.ok) return binary ? Buffer.from(await res.arrayBuffer()) : await res.text();
+      const retryAfter = Number(res.headers.get('retry-after'));
+      if (retryAfter > 0) wait = Math.min(120_000, retryAfter * 1000);
+      const err = new Error(`${res.status} ${url}`);
+      if (res.status !== 429 && res.status < 500) { err.fatal = true; }
+      throw err;
     } catch (err) {
-      if (i + 1 >= tries) throw err;
-      await new Promise(r => setTimeout(r, 1000 * 2 ** i));
+      if (err.fatal || i + 1 >= tries) throw err;
+      await sleep(wait + Math.random() * 1000);
     }
   }
 }
@@ -98,34 +106,77 @@ function image(file, category, id, { height, width, trim = false } = {}) {
   return rel;
 }
 
+// 위키 API 로 파일 50개씩 묶어 실제 이미지 주소(CDN)와 sha1 을 받는다.
+// 이미지마다 위키에 요청하면 429 로 막히므로, 위키 요청은 이 묶음 조회만 한다.
+export async function resolveFiles(files) {
+  const out = new Map();
+  const list = [...new Set(files)];
+  for (let i = 0; i < list.length; i += 50) {
+    const chunk = list.slice(i, i + 50);
+    const qs = new URLSearchParams({
+      action: 'query', format: 'json', formatversion: '2',
+      prop: 'imageinfo', iiprop: 'url|sha1',
+      titles: chunk.map(f => `File:${f}`).join('|'),
+    });
+    const r = JSON.parse(await get(`${WIKI}/api.php?${qs}`));
+    const norm = new Map((r.query.normalized || []).map(n => [n.from, n.to]));
+    const pages = new Map((r.query.pages || []).map(p => [p.title, p]));
+    for (const f of chunk) {
+      const title = norm.get(`File:${f}`) || `File:${f}`;
+      const info = pages.get(title)?.imageinfo?.[0];
+      if (info?.url) out.set(f, { url: info.url, sha1: info.sha1 });
+    }
+    await sleep(500);
+  }
+  return out;
+}
+
+const MANIFEST = join(DATA, 'img', 'manifest.json');
+
 async function runImageJobs() {
+  let manifest = {};
+  try { manifest = JSON.parse(await readFile(MANIFEST, 'utf8')); } catch { /* 처음 */ }
+
+  const resolved = await resolveFiles(imageJobs.map(j => j.file));
   let done = 0, failed = 0, skipped = 0;
   const total = imageJobs.length;
   const progress = setInterval(() => console.log(`이미지 진행: ${done + failed + skipped}/${total}`), 15_000);
   const queue = imageJobs.slice();
+
   async function worker() {
     for (let job = queue.shift(); job; job = queue.shift()) {
+      const rel = job.out.slice(join(ROOT, 'site').length + 1);
+      const info = resolved.get(job.file);
       try {
-        if (process.argv.includes('--keep-images')) {
-          try { await access(job.out); skipped++; continue; } catch { /* 없으면 받는다 */ }
-        }
-        const buf = await get(`${WIKI}/wiki/Special:FilePath/${encodeURIComponent(job.file)}`, { binary: true });
+        if (!info) throw new Error('위키에 파일 없음');
+        // 원본(sha1)과 변환 설정이 그대로이고 파일이 있으면 다시 받지 않는다.
+        const sig = `${info.sha1}:${job.width || ''}x${job.height || ''}:${job.trim ? 't' : ''}`;
+        if (manifest[rel] === sig && await access(job.out).then(() => true, () => false)) { skipped++; continue; }
+        const buf = await get(info.url, { binary: true });
+        await sleep(150);
         let img = sharp(buf);
         if (job.trim) img = img.trim();
         img = img.resize({ width: job.width, height: job.height, fit: 'inside', withoutEnlargement: true });
         await mkdir(dirname(job.out), { recursive: true });
         await img.webp({ quality: 82, effort: 5 }).toFile(job.out);
+        manifest[rel] = sig;
         done++;
       } catch (err) {
+        // 받지 못했어도 예전에 받아 둔 파일이 있으면 그걸 쓴다.
+        if (await access(job.out).then(() => true, () => false)) { skipped++; console.warn(`! 이미지 갱신 실패(기존 파일 유지) ${job.file}: ${err.message}`); continue; }
         failed++;
         job.failed = true;
         console.warn(`! 이미지 실패 ${job.file}: ${err.message}`);
       }
     }
   }
-  await Promise.all(Array.from({ length: 6 }, worker));
+  await Promise.all(Array.from({ length: 3 }, worker));
   clearInterval(progress);
+
+  await mkdir(dirname(MANIFEST), { recursive: true });
+  await writeFile(MANIFEST, JSON.stringify(Object.fromEntries(Object.entries(manifest).sort()), null, 1));
   console.log(`이미지: ${done}개 저장, ${skipped}개 유지, ${failed}개 실패`);
+  return { done, skipped, failed, total };
 }
 
 // ---------------------------------------------------------------- 카테고리
@@ -377,7 +428,8 @@ async function main() {
     await bossCategory(),
   ];
 
-  if (WITH_IMAGES) await runImageJobs();
+  let imageStats = null;
+  if (WITH_IMAGES) imageStats = await runImageJobs();
   else for (const job of imageJobs) job.failed = !(await access(job.out).then(() => true, () => false));
 
   // 받지 못한 이미지는 경로를 지워서 이름 타일로 보이게 한다.
@@ -415,6 +467,10 @@ async function main() {
 
   for (const c of categories) console.log(`${c.name}: ${c.items.length}개`);
   console.log(same ? '데이터 변경 없음' : '데이터 갱신됨');
+  // 이미지가 일부 빠져도 데이터는 저장하되(이름 타일로 표시됨), 워크플로에서 알 수 있게 표시한다.
+  if (imageStats?.failed && process.env.GITHUB_OUTPUT) {
+    await writeFile(process.env.GITHUB_OUTPUT, `image_failed=${imageStats.failed}\n`, { flag: 'a' });
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

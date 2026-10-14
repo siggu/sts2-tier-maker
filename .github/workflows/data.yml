@@ -36,6 +36,7 @@ jobs:
         working-directory: tools
 
       - name: 위키에서 데이터·이미지 수집
+        id: fetch
         run: node tools/fetch-data.mjs
 
       - name: 바뀐 내용 커밋
@@ -49,3 +50,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "data: 위키 데이터 갱신"
           git push
+
+      - name: 이미지 누락 경고
+        if: steps.fetch.outputs.image_failed
+        run: echo "::warning::이미지 ${{ steps.fetch.outputs.image_failed }}개를 받지 못해 이름 타일로 표시됩니다. 다음 실행에서 다시 시도합니다."
