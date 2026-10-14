@@ -77,15 +77,25 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 
 | 요청 | 설명 |
 |---|---|
-| `POST /gallery` `{ template, title, state }` 🔒 | 티어표 공개. `{ post }`. 한 사람이 하루 20개까지. |
-| `GET /gallery?template=&sort=new|top&cursor=&author=` | `{ posts: [post], next }` (20개씩). `template` 이 없으면 전체. `author` 는 users.id. `top` = likes − dislikes 순. |
+| `POST /gallery` `{ kind?, template, title, state }` 🔒 | 티어표·밸런스 투표 공개. `{ post }`. 한 사람이 하루 20개까지(종류 합산). |
+| `GET /gallery?kind=tier|balance&template=&sort=new|top&cursor=&author=` | `{ posts: [post], next }` (20개씩). **`kind` 를 빼면 `tier` 만** (kind 를 모르는 예전 화면 호환). `template` 이 없으면 전체. `author` 는 users.id. `top` = likes − dislikes 순. |
 | `GET /gallery/:id` | `{ post }` |
 | `DELETE /gallery/:id` 🔒 | 작성자나 관리자 |
 | `POST /gallery/:id/react` `{ v: 1 | -1 | 0 }` 🔒 | 0 은 취소. `{ likes, dislikes, myReaction }` |
 
-`post` = `{ id, template, title, state, author: { id, name, picture }, created, likes, dislikes, comments, myReaction: 1|-1|0 }`
+`post` = `{ id, kind: 'tier'|'balance', template, title, state, author: { id, name, picture }, created, likes, dislikes, comments, myReaction: 1|-1|0 }`
 (덧붙임: `hidden: bool` — 숨겨진 글은 작성자·관리자에게만 오며 그때 `true`. `next` 는 다음 쪽 `cursor` 로 그대로 넘기는 문자열, 끝이면 `null`.)
 (목록에서도 `state` 를 포함한다 — 미리보기 썸네일용.)
+
+`kind` (0004 에서 추가, 기존 글은 모두 `'tier'`):
+- `'tier'` (기본값): 티어표. `state` = `{ title, tiers: [{ label, color, items }] }` (줄 1–20개).
+- `'balance'`: 밸런스 투표 공개. `state` 는 티어표와 같은 모양이되 줄이 정확히 3개, 순서대로
+  `{ label: 'nerf', color: '#e5484d' }`, `{ label: 'fair', color: '#b9ae95' }`, `{ label: 'buff', color: '#57a7d8' }`.
+  항목은 `template` 의 카테고리에 있는 id 이고 한 번씩만(아니면 400 `state.items`). 화면은 label 을 그대로 보이지 않고
+  그 카테고리의 판정 이름(너프 필요/적당함/버프 필요 …)으로 바꿔 그린다. 서버는 글 내용을 실제 투표와 맞춰 보지 않는다
+  (화면이 제출한 표만 담아 보낸다).
+- 그 밖의 값은 400 `kind`. 반응·댓글·신고·삭제는 종류와 상관없이 같다.
+- `GET /tiers/aggregate`(모두의 티어표) 는 `kind = 'tier'` 글만 센다.
 
 ## 댓글 (account.js)
 

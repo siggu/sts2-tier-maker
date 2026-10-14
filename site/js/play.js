@@ -1,4 +1,4 @@
-// 모두의 티어표(공개·동기화된 티어표 합산)와 A vs B 대결.
+// 모두의 티어표(공개·동기화된 티어표 합산)와 월드컵(토너먼트, 경로는 예전 그대로 #/versus).
 // app.js 가 route / navLinks / homeBlocks / tierActions 를 부른다.
 
 import { h, toast, tile, board, attachTooltips, itemDetails, hideTip } from './ui.js';
@@ -8,6 +8,7 @@ import { API_BASE, voterId } from './balance.js';
 import { authHeaders, currentUser } from './auth.js';
 import { loadState, DEFAULT_TIERS } from './tierlist.js';
 import { renderPng } from './export.js';
+import { mountWorldCup, hasRunningCup, sizesFor, SIZES } from './worldcup.js';
 
 // ---------------------------------------------------------------- 공용
 
@@ -49,7 +50,7 @@ export function homeBlocks(mode) {
   if (mode !== 'tier') return [];
   return [h('section', { class: 'block vs-promo-wrap' },
     h('a', { class: 'vs-promo', href: '#/versus' },
-      h('span', { class: 'vs-promo-icon', 'aria-hidden': 'true' }, '⚔️'),
+      h('span', { class: 'vs-promo-icon', 'aria-hidden': 'true' }, '🏆'),
       h('span', { class: 'vs-promo-text' },
         h('strong', {}, t('vs.promo.title')),
         h('span', {}, t('vs.promo.body'))),
@@ -203,7 +204,9 @@ async function savePng(template, rows) {
   }
 }
 
-// ---------------------------------------------------------------- A vs B 대결
+// ---------------------------------------------------------------- 월드컵 (토너먼트)
+// 대진·라운드·되돌리기·이어 하기·우승 화면은 worldcup.js 엔진이 맡고, 여기서는 게임 데이터를 넘기고
+// 경기마다 POST /versus (Elo), 판이 끝나면 POST /versus/tournament (우승·출전 횟수) 를 보낸다.
 
 // 무엇을 묻는가: 적은 '더 어려운', 저주는 '더 괴로운', 캐릭터는 '더 강한', 나머지는 '더 좋은'
 function question(cat) {
@@ -214,22 +217,14 @@ function question(cat) {
 }
 
 const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+const CUP_KEY = (catId, gid) => `sts2vs.cup.${catId}:${gid}`;
 
-// 이번 방문(탭)에서 본 쌍과 고른 횟수: sessionStorage
+// 이번 방문(탭)에서 고른 횟수: sessionStorage
 const SESSION_KEY = 'sts2vs.session';
-const session = (() => {
-  const raw = read(SESSION_KEY, null, 'session');
-  return {
-    picks: Number(raw?.picks) || 0,
-    seen: raw?.seen && typeof raw.seen === 'object' ? raw.seen : {},
-  };
-})();
+const session = { picks: Number(read(SESSION_KEY, null, 'session')?.picks) || 0 };
 const saveSession = () => write(SESSION_KEY, session, 'session');
-function seenSet(scope) {
-  return new Set(session.seen[scope] || []);
-}
 
-// 지금까지 판정한 쌍(방문을 넘어서): localStorage. 아직 판정하지 않은 쌍을 먼저 보여 주는 데 쓴다.
+// 지금까지 판정한 쌍(방문을 넘어서): localStorage. 같은 쌍을 다시 고른 표인지(again) 알고, 카테고리별 선택 수를 보여 준다.
 const JUDGED_KEY = cat => `sts2vs.judged.${cat}`;
 const JUDGED_MAX = 4000;
 const loadJudged = catId => new Set(read(JUDGED_KEY(catId), []));
@@ -240,6 +235,7 @@ function addJudged(catId, key) {
 }
 
 // ---- 표 보내기 (실패하면 대기열에 두고 다시 보낸다) ----
+// 대기열 항목: { category, winner, loser, again? } (경기 표) 또는 { kind: 'cup', category, champion, entrants } (월드컵 결과)
 
 const PENDING_KEY = 'sts2vs.pending';
 let flushTimer = null;
@@ -263,12 +259,15 @@ async function flushVotes() {
       const pending = read(PENDING_KEY, []);
       if (!pending.length) { warned = false; return; }
       const vote = pending[0];
-      const body = { category: vote.category, winner: vote.winner, loser: vote.loser };
+      const cup = vote.kind === 'cup';
+      const body = cup
+        ? { category: vote.category, champion: vote.champion, entrants: vote.entrants }
+        : { category: vote.category, winner: vote.winner, loser: vote.loser };
       // 로그인 상태면 서버가 계정으로 센다. 아니면 밸런스 투표와 같은 익명 id.
       if (!currentUser()) body.voter = voterId();
       let status = 0, result = null;
       try {
-        const res = await fetch(`${API_BASE}/versus`, {
+        const res = await fetch(`${API_BASE}${cup ? '/versus/tournament' : '/versus'}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify(body),
@@ -287,7 +286,7 @@ async function flushVotes() {
       const now = read(PENDING_KEY, []);
       now.shift();
       write(PENDING_KEY, now);
-      if (result?.ratings) applyResult(vote, result.ratings);
+      if (!cup && result?.ratings) applyResult(vote, result.ratings);
     }
   } finally {
     flushing = false;
@@ -296,6 +295,8 @@ async function flushVotes() {
 
 if (read(PENDING_KEY, []).length) setTimeout(flushVotes, 2500);
 
+const blankRow = () => ({ rating: 1500, wins: 0, losses: 0, champ: 0, entries: 0 });
+
 // 서버 순위는 30초 캐시라 다시 받지 않고, 응답의 새 점수로 받아 둔 순위를 고친다.
 // (같은 쌍을 다시 고른 경우 서버는 승패를 다시 세므로 여기서는 승패를 더하지 않는다.)
 function applyResult(vote, ratings) {
@@ -303,9 +304,20 @@ function applyResult(vote, ratings) {
   if (!hit) return;
   const items = hit.items;
   for (const [id, delta] of [[vote.winner, 'wins'], [vote.loser, 'losses']]) {
-    const r = items[id] || (items[id] = { rating: 1500, wins: 0, losses: 0 });
+    const r = items[id] || (items[id] = blankRow());
     if (Number.isFinite(Number(ratings[id]))) r.rating = Number(ratings[id]);
     if (!vote.again) r[delta] = (Number(r[delta]) || 0) + 1;
+  }
+}
+
+// 월드컵 결과는 보내자마자 받아 둔 순위에도 더한다.
+function applyCup(category, champion, entrants) {
+  const hit = rankingCache.get(category);
+  if (!hit) return;
+  for (const id of entrants) {
+    const r = hit.items[id] || (hit.items[id] = blankRow());
+    r.entries = (Number(r.entries) || 0) + 1;
+    if (id === champion) r.champ = (Number(r.champ) || 0) + 1;
   }
 }
 
@@ -318,93 +330,6 @@ async function fetchRanking(catId, signal) {
   return items;
 }
 
-// ---- 쌍 고르기 ----
-// buckets: 서로 붙일 수 있는 아이템 묶음들 (카드는 캐릭터별, 나머지는 하나)
-// 이번 방문에서 본 쌍은 다시 내지 않고, 예전에 판정한 쌍보다 처음 보는 쌍을 먼저,
-// 그중에서도 이번 방문에 덜 나온 아이템이 든 쌍을 고른다.
-function makePairs(buckets, scope, catId) {
-  const seen = seenSet(scope);
-  const judged = loadJudged(catId);
-  const shown = new Map();
-  const shownOf = id => shown.get(id) || 0;
-  const usable = buckets.filter(b => b.length >= 2);
-  const totalPairs = usable.reduce((n, b) => n + (b.length * (b.length - 1)) / 2, 0);
-  const rand = n => Math.floor(Math.random() * n);
-  const best = cands => {
-    // 몇 개를 뽑아 덜 나온 아이템이 든 쌍을 고른다
-    let pick = null, score = Infinity;
-    for (let i = 0; i < Math.min(8, cands.length); i++) {
-      const c = cands[rand(cands.length)];
-      const s = shownOf(c[0].id) + shownOf(c[1].id) + Math.random() * 0.5;
-      if (s < score) { score = s; pick = c; }
-    }
-    return pick;
-  };
-
-  function next(avoid) {
-    if (!usable.length) return null;
-    let pair = null;
-    if (totalPairs <= 1500) {
-      const fresh = [], old = [];
-      for (const b of usable) {
-        for (let i = 0; i < b.length; i++) {
-          for (let j = i + 1; j < b.length; j++) {
-            const k = pairKey(b[i].id, b[j].id);
-            if (seen.has(k) || k === avoid) continue;
-            (judged.has(k) ? old : fresh).push([b[i], b[j]]);
-          }
-        }
-      }
-      pair = best(fresh.length ? fresh : old);
-    } else {
-      // 쌍이 너무 많으면 무작위로 뽑아 본다 (묶음은 쌍의 수에 비례해 고른다)
-      let fallback = null;
-      const cands = [];
-      for (let tries = 0; tries < 400 && cands.length < 8; tries++) {
-        let r = Math.random() * totalPairs;
-        let b = usable[0];
-        for (const x of usable) { const n = (x.length * (x.length - 1)) / 2; if (r < n) { b = x; break; } r -= n; }
-        // 덜 나온 아이템을 한쪽에 두기: 셋 중 가장 덜 나온 것
-        let a = b[rand(b.length)];
-        for (let s = 0; s < 2; s++) { const c = b[rand(b.length)]; if (shownOf(c.id) < shownOf(a.id)) a = c; }
-        const o = b[rand(b.length)];
-        if (o === a) continue;
-        const k = pairKey(a.id, o.id);
-        if (seen.has(k) || k === avoid) continue;
-        if (judged.has(k)) { fallback ??= [a, o]; continue; }
-        cands.push([a, o]);
-      }
-      pair = cands.length ? best(cands) : fallback;
-    }
-    if (!pair) return null;
-    return Math.random() < 0.5 ? pair : [pair[1], pair[0]];
-  }
-
-  return {
-    next,
-    show(pair) {
-      const k = pairKey(pair[0].id, pair[1].id);
-      seen.add(k);
-      for (const it of pair) shown.set(it.id, shownOf(it.id) + 1);
-      session.seen[scope] = [...seen].slice(-5000);
-      saveSession();
-    },
-    judged(pair) { return judged.has(pairKey(pair[0].id, pair[1].id)); },
-    judge(pair) { const k = pairKey(pair[0].id, pair[1].id); judged.add(k); addJudged(catId, k); },
-    reset() { seen.clear(); shown.clear(); delete session.seen[scope]; saveSession(); },
-    get size() { return totalPairs; },
-  };
-}
-
-function preload(pair) {
-  for (const it of pair || []) {
-    if (!it.img) continue;
-    const img = new Image();
-    img.decoding = 'async';
-    img.src = it.img;
-  }
-}
-
 function vsCrumbs(cat) {
   return h('nav', { class: 'crumbs', 'aria-label': t('crumbs.aria') },
     cat ? h('a', { href: '#/versus' }, t('vs.title')) : h('span', { 'aria-current': 'page' }, t('vs.title')),
@@ -415,27 +340,30 @@ function vsCrumbs(cat) {
 const sessionBadge = () => h('span', { class: 'vs-counter', 'aria-live': 'polite' }, t('vs.session', { n: session.picks }));
 
 function viewVersusHome(ctx) {
-  const cats = ctx.db.categories.filter(c => c.items.length >= 2);
+  const cats = ctx.db.categories.filter(c => c.items.length >= SIZES[0]);
   ctx.render(
     vsCrumbs(null),
     h('header', { class: 'page-head vs-head' },
       h('div', {},
         h('h1', {}, t('vs.title')),
         h('p', {}, t('vs.lead'))),
-      session.picks > 0 && sessionBadge(),
+      session.picks > 0 ? sessionBadge() : null,
     ),
     h('section', { class: 'block' },
       h('h2', { class: 'block-title' }, t('vs.pickCat')),
       h('div', { class: 'cat-grid' }, cats.map(cat => {
         const judged = read(JUDGED_KEY(cat.id), []).length;
+        const top = sizesFor(cat.items.length).pop();
         return h('a', { class: 'cat-card', href: `#/versus/${cat.id}` },
           ctx.thumbs(cat.items, cat.tile, 4),
           h('div', { class: 'cat-card-body' },
-            h('h3', {}, cat.name),
+            h('h3', {}, t('vs.catTitle', { cat: cat.name })),
             h('p', {}, question(cat)),
             h('div', { class: 'cat-card-meta' },
               h('span', {}, t('n.items', { n: cat.items.length })),
-              judged > 0 && h('span', { class: 'badge-on' }, t('vs.myPicks', { n: judged }))),
+              h('span', {}, t('vs.upTo', { size: t('wc.size', { n: top }) })),
+              hasRunningCup(`sts2vs.cup.${cat.id}:`) ? h('span', { class: 'badge-on' }, t('vs.running')) : null,
+              judged > 0 ? h('span', { class: 'badge-on' }, t('vs.myPicks', { n: judged })) : null),
           ),
         );
       })),
@@ -444,6 +372,7 @@ function viewVersusHome(ctx) {
 }
 
 let lastTab = 'play';
+const RANK_SORT_KEY = 'sts2vs.rankSort';
 
 function viewVersus(catId, params, ctx) {
   const db = ctx.db;
@@ -451,128 +380,109 @@ function viewVersus(catId, params, ctx) {
   if (!cat || cat.items.length < 2) return ctx.notFound();
   const groups = (cat.groups || []).filter(g => cat.items.filter(i => inGroup(i, g.id)).length >= 2);
   const gid = groups.some(g => g.id === params.get('g')) ? params.get('g') : '';
+  const group = groups.find(g => g.id === gid);
   const items = gid ? cat.items.filter(i => inGroup(i, gid)) : cat.items;
-  // 카드는 캐릭터가 다르면 비교가 무의미하므로 '전체'에서도 같은 캐릭터끼리만 붙인다.
+  // 카드는 캐릭터가 다르면 비교가 무의미하므로 '전체'에서는 월드컵 대신 캐릭터를 먼저 고르게 한다.
   const sameGroup = Boolean(cat.split?.groupFirst) && !gid && groups.length > 1;
-  const buckets = sameGroup ? groups.map(g => items.filter(i => inGroup(i, g.id))) : [items];
-  const scope = `${cat.id}:${gid}`;
-  const pairs = makePairs(buckets, scope, cat.id);
   const pseudo = { tile: cat.tile, byId: cat.byId };
   const ac = new AbortController();
   ctx.addCleanup(() => ac.abort());
 
   let tab = lastTab;
-  let current = null;
-  let upcoming = null;
-  let last = null;
   let rankShown = 50;
+  let rankSort = read(RANK_SORT_KEY, 'elo') === 'cup' ? 'cup' : 'elo';
+  let cup = null;
+  ctx.addCleanup(() => cup?.destroy());
 
   const counter = sessionBadge();
   const body = h('div', { class: 'vs-body' });
   const tabs = h('div', { class: 'seg vs-tabs', role: 'tablist', 'aria-label': t('vs.tabAria') });
 
+  function setTab(k) {
+    if (tab === k) return;
+    tab = lastTab = k;
+    drawTabs();
+    drawBody();
+  }
+
   function drawTabs() {
     tabs.replaceChildren(...['play', 'rank'].map(k => h('button', {
       role: 'tab', class: tab === k ? 'on' : null, 'aria-selected': String(tab === k),
-      onclick: () => { if (tab !== k) { tab = lastTab = k; drawTabs(); drawBody(); } },
+      onclick: () => setTab(k),
     }, t(`vs.tab.${k}`))));
   }
 
+  const groupHref = id => `#/versus/${cat.id}${id ? `?g=${encodeURIComponent(id)}` : ''}`;
   const groupLink = (id, label, color) => h('a', {
-    class: `vs-chip${gid === id ? ' on' : ''}`, href: `#/versus/${cat.id}${id ? `?g=${encodeURIComponent(id)}` : ''}`,
+    class: `vs-chip${gid === id ? ' on' : ''}`, href: groupHref(id),
     'aria-current': gid === id ? 'true' : null, style: color ? { '--chip': color } : null,
   }, label);
 
   ctx.render(
     vsCrumbs(cat),
     h('header', { class: 'vs-head' },
-      h('h1', { class: 'board-h1' }, t('vs.catTitle', { cat: cat.name })),
+      h('h1', { class: 'board-h1' }, t('vs.catTitle', { cat: cat.name }), group ? h('span', { class: 'vs-head-group' }, ` · ${group.name}`) : null),
       counter,
     ),
     h('div', { class: 'vs-controls' },
       tabs,
-      groups.length > 1 && h('nav', { class: 'vs-groups', 'aria-label': t('vs.groupAria') },
+      groups.length > 1 ? h('nav', { class: 'vs-groups', 'aria-label': t('vs.groupAria') },
         groupLink('', t('vs.all')),
-        groups.map(g => groupLink(g.id, g.name, g.color))),
+        groups.map(g => groupLink(g.id, g.name, g.color))) : null,
     ),
-    sameGroup && h('p', { class: 'help vs-note' }, t('vs.sameGroup')),
     body,
   );
   drawTabs();
 
-  // ---- 대결 ----
+  // ---- 월드컵 ----
 
-  function advance() {
-    if (upcoming && !seenSet(scope).has(pairKey(upcoming[0].id, upcoming[1].id))) current = upcoming;
-    else current = pairs.next();
-    if (current) pairs.show(current);
-    upcoming = current ? pairs.next(pairKey(current[0].id, current[1].id)) : null;
-    preload(upcoming);
+  function extra(item) {
+    const text = cat.tile === 'icon' ? itemDetails(item)[2] : null;
+    const meta = [item.groupName && item.groupName !== cat.name ? item.groupName : null, item.area].filter(Boolean)[0];
+    return [meta ? h('span', { class: 'vs-meta' }, meta) : null, text || null].filter(Boolean);
   }
 
-  function choose(side) {
-    if (!current) return;
-    const winner = current[side], loser = current[1 - side];
-    queueVote({ category: cat.id, winner: winner.id, loser: loser.id, again: pairs.judged(current) || undefined });
-    pairs.judge(current);
+  function onMatch({ winner, loser }) {
+    const k = pairKey(winner.id, loser.id);
+    const judged = loadJudged(cat.id);
+    queueVote({ category: cat.id, winner: winner.id, loser: loser.id, again: judged.has(k) || undefined });
+    addJudged(cat.id, k);
     session.picks++;
     saveSession();
     counter.textContent = t('vs.session', { n: session.picks });
-    last = { winner, loser };
-    advance();
-    drawBody();
   }
 
-  function skip() {
-    if (!current) return;
-    last = null;
-    advance();
-    drawBody();
-  }
-
-  function side(item, i) {
-    const text = cat.tile === 'icon' ? itemDetails(item)[2] : null;
-    const meta = [item.groupName && item.groupName !== cat.name ? item.groupName : null, item.area].filter(Boolean)[0];
-    return h('div', { class: `vs-side vs-${i ? 'right' : 'left'}` },
-      h('button', {
-        class: 'vs-pick', 'aria-label': t('vs.pickAria', { name: item.name }),
-        onclick: () => choose(i),
-      },
-        h('span', { class: `vs-media kind-${cat.tile}` },
-          item.img ? h('img', { src: item.img, alt: '', decoding: 'async', draggable: 'false' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, '?')),
-        h('span', { class: 'vs-name' }, item.name),
-        meta && h('span', { class: 'vs-meta' }, meta),
-        text,
-        h('span', { class: 'vs-key kbd-only', 'aria-hidden': 'true' }, i ? '→' : '←'),
-      ),
-      h('button', { class: 'btn ghost small vs-info', onclick: () => openDetail(item, cat, db) }, t('vs.detail')),
-    );
+  function onFinish({ champion, entrants }) {
+    queueVote({ kind: 'cup', category: cat.id, champion: champion.id, entrants });
+    applyCup(cat.id, champion.id, entrants);
   }
 
   function drawPlay() {
-    if (!current) {
-      return h('section', { class: 'empty vs-done' },
-        h('h2', {}, t('vs.done')),
-        h('p', {}, t('vs.doneBody')),
-        h('p', { class: 'actions agg-empty-actions' },
-          h('button', { class: 'btn primary', onclick: () => { pairs.reset(); upcoming = null; advance(); drawBody(); } }, t('vs.restart')),
-          h('button', { class: 'btn', onclick: () => { tab = lastTab = 'rank'; drawTabs(); drawBody(); } }, t('vs.tab.rank'))),
+    if (sameGroup) {
+      return h('section', { class: 'empty cup-groups' },
+        h('h2', {}, t('vs.pickGroup')),
+        h('p', {}, t('vs.pickGroupBody')),
+        h('div', { class: 'cup-group-grid' }, groups.map(g => {
+          const n = items.filter(i => inGroup(i, g.id)).length;
+          return h('a', { class: 'vs-chip cup-group', href: groupHref(g.id), style: g.color ? { '--chip': g.color } : null },
+            h('span', {}, g.name), h('small', {}, t('n.items', { n })));
+        })),
       );
     }
-    return h('section', { class: 'vs-arena' },
-      h('h2', { class: 'vs-question' }, question(cat)),
-      h('div', { class: `vs-pair kind-${cat.tile}` },
-        side(current[0], 0),
-        h('div', { class: 'vs-mid', 'aria-hidden': 'true' }, 'VS'),
-        side(current[1], 1),
-      ),
-      h('div', { class: 'vs-actions' },
-        h('button', { class: 'btn ghost vs-skip', onclick: skip }, t('vs.skip'), h('span', { class: 'kbd-only vs-kbd', 'aria-hidden': 'true' }, '↓')),
-      ),
-      h('p', { class: 'vs-last', 'aria-live': 'polite' },
-        last ? [h('span', { class: 'vs-last-label' }, t('vs.lastLabel')), ' ', h('strong', {}, last.winner.name), ' > ', last.loser.name] : ''),
-      h('p', { class: 'vs-keys kbd-only' }, t('vs.keys')),
-    );
+    cup = mountWorldCup({
+      storeKey: CUP_KEY(cat.id, gid),
+      title: [t('vs.catTitle', { cat: cat.name }), group?.name].filter(Boolean).join(' · '),
+      question: question(cat),
+      items,
+      kind: cat.tile,
+      extra,
+      mini: item => tile(item, pseudo, { tabindex: null, role: null, 'aria-hidden': 'true' }),
+      onDetail: item => openDetail(item, cat, db),
+      onMatch,
+      onFinish,
+      onRank: () => setTab('rank'),
+    });
+    return cup.el;
   }
 
   // ---- 순위 ----
@@ -590,24 +500,36 @@ function viewVersus(catId, params, ctx) {
       return;
     }
     if (ac.signal.aborted || tab !== 'rank' || !target.isConnected) return;
+    const num = v => Number(v) || 0;
     const rows = items
       .map(item => ({ item, r: data[item.id] }))
-      .filter(x => x.r && (Number(x.r.wins) + Number(x.r.losses)) > 0)
-      .map(x => ({ item: x.item, rating: Number(x.r.rating) || 1500, w: Number(x.r.wins) || 0, l: Number(x.r.losses) || 0 }))
-      .sort((a, b) => b.rating - a.rating || b.w - a.w);
+      .filter(x => x.r && (num(x.r.wins) + num(x.r.losses) + num(x.r.entries)) > 0)
+      .map(x => {
+        const champ = num(x.r.champ), entries = num(x.r.entries);
+        return {
+          item: x.item, rating: Number(x.r.rating) || 1500, w: num(x.r.wins), l: num(x.r.losses),
+          champ, entries, cupRate: entries ? champ / entries : -1,
+        };
+      });
+    if (rankSort === 'cup') rows.sort((a, b) => b.cupRate - a.cupRate || b.champ - a.champ || b.entries - a.entries || b.rating - a.rating);
+    else rows.sort((a, b) => b.rating - a.rating || b.w - a.w || b.champ - a.champ);
     if (!rows.length) {
       target.replaceChildren(h('div', { class: 'empty' },
         h('p', {}, t('vs.rank.empty')),
-        h('p', {}, h('button', { class: 'btn primary', onclick: () => { tab = lastTab = 'play'; drawTabs(); drawBody(); } }, t('vs.tab.play')))));
+        h('p', {}, h('button', { class: 'btn primary', onclick: () => setTab('play') }, t('vs.tab.play')))));
       return;
     }
     const games = rows.reduce((n, r) => n + r.w, 0);
+    const cups = rows.reduce((n, r) => n + r.champ, 0);
     const list = h('ol', { class: 'vs-rank' }, rows.slice(0, rankShown).map((r, i) => {
       const n = r.w + r.l;
-      const pctW = Math.round((r.w / n) * 100);
+      const pctW = n ? Math.round((r.w / n) * 100) : 0;
+      const pctC = r.entries ? Math.round((r.champ / r.entries) * 100) : 0;
+      const few = rankSort === 'cup' ? r.entries < FEW : n < FEW;
+      const cupText = r.entries ? t('vs.rank.cup', { c: r.champ, e: r.entries, p: pctC }) : t('vs.rank.noCup');
       return h('li', {
-        class: `vs-rank-row${n < FEW ? ' few' : ''}`, tabindex: '0', role: 'button',
-        'aria-label': `${i + 1}. ${r.item.name} · ${t('vs.rank.wl', { w: r.w, l: r.l })}`,
+        class: `vs-rank-row${few ? ' few' : ''}`, tabindex: '0', role: 'button',
+        'aria-label': `${i + 1}. ${r.item.name} · ${t('vs.rank.wl', { w: r.w, l: r.l })} · ${cupText}`,
         onclick: () => openDetail(r.item, cat, db),
         onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.item, cat, db); } },
       },
@@ -615,26 +537,44 @@ function viewVersus(catId, params, ctx) {
         tile(r.item, pseudo),
         h('span', { class: 'vs-rank-main' },
           h('span', { class: 'vs-rank-name' }, r.item.name,
-            !gid && r.item.groupName && r.item.groupName !== cat.name && h('span', { class: 'result-group' }, r.item.groupName)),
-          h('span', { class: 'vs-rank-bar', 'aria-hidden': 'true' }, h('span', { style: { width: `${pctW}%` } })),
-          h('span', { class: 'vs-rank-sub' }, t('vs.rank.wl', { w: r.w, l: r.l }), ' · ', t('vs.rank.rate', { p: pctW }))),
-        h('span', { class: 'vs-rank-rating', title: t('vs.rank.rating') }, String(Math.round(r.rating))),
+            !gid && r.item.groupName && r.item.groupName !== cat.name ? h('span', { class: 'result-group' }, r.item.groupName) : null),
+          h('span', { class: `vs-rank-bar${rankSort === 'cup' ? ' is-cup' : ''}`, 'aria-hidden': 'true' },
+            h('span', { style: { width: `${rankSort === 'cup' ? pctC : pctW}%` } })),
+          h('span', { class: 'vs-rank-sub' },
+            n ? [t('vs.rank.wl', { w: r.w, l: r.l }), ' · ', t('vs.rank.rate', { p: pctW })] : t('vs.rank.noGames'),
+            h('br'),
+            h('span', { class: `vs-rank-cup${r.champ ? ' has' : ''}` }, r.champ ? '🏆 ' : null, cupText))),
+        rankSort === 'cup'
+          ? h('span', { class: 'vs-rank-rating', title: t('vs.rank.cupRate') }, r.entries ? `${pctC}%` : '–')
+          : h('span', { class: 'vs-rank-rating', title: t('vs.rank.rating') }, String(Math.round(r.rating))),
       );
     }));
     attachTooltips(list, id => cat.byId.get(id));
     const unrated = items.length - rows.length;
+    const sortSeg = h('div', { class: 'seg vs-rank-sort', role: 'group', 'aria-label': t('vs.rank.sort') },
+      ['elo', 'cup'].map(k => h('button', {
+        class: rankSort === k ? 'on' : null, 'aria-pressed': String(rankSort === k),
+        onclick: () => { if (rankSort !== k) { rankSort = k; write(RANK_SORT_KEY, k); drawRank(target); } },
+      }, t(`vs.rank.sort.${k}`))));
     // 조건부 조각(cond && h(...))이 false 면 글자 'false' 로 찍히므로 걸러 낸다
     target.replaceChildren(...[
-      h('p', { class: 'vs-rank-status' }, t('vs.rank.summary', { n: rows.length, games })),
+      h('div', { class: 'vs-rank-head' },
+        h('p', { class: 'vs-rank-status' },
+          t('vs.rank.summary', { n: rows.length, games }), cups > 0 ? ` · ${t('vs.rank.cups', { n: cups })}` : ''),
+        sortSeg),
       list,
       rows.length > rankShown && h('p', { class: 'vs-more' },
         h('button', { class: 'btn', onclick: () => { rankShown += 50; drawRank(target); } }, t('vs.rank.more', { n: rows.length - rankShown }))),
-      h('p', { class: 'help vs-rank-help' }, t('vs.rank.help', { n: FEW }), unrated > 0 ? ` ${t('vs.rank.unrated', { n: unrated })}` : ''),
+      h('p', { class: 'help vs-rank-help' },
+        t(rankSort === 'cup' ? 'vs.rank.helpCup' : 'vs.rank.help', { n: FEW }),
+        unrated > 0 ? ` ${t('vs.rank.unrated', { n: unrated })}` : ''),
     ].filter(Boolean));
   }
 
   function drawBody() {
     hideTip();
+    cup?.destroy();
+    cup = null;
     if (tab === 'rank') {
       const target = h('section', { class: 'vs-rank-wrap' });
       body.replaceChildren(target);
@@ -644,18 +584,5 @@ function viewVersus(catId, params, ctx) {
     }
   }
 
-  function onKey(e) {
-    if (tab !== 'play' || !current || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
-    if (document.body.classList.contains('modal-open')) return;
-    const el = e.target;
-    if (el && (el.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))) return;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); choose(0); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); choose(1); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); skip(); }
-  }
-  document.addEventListener('keydown', onKey);
-  ctx.addCleanup(() => document.removeEventListener('keydown', onKey));
-
-  advance();
   drawBody();
 }

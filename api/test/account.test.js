@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyGoogleIdToken, makeKeyResolver, keyResolverFor, getUser } from '../src/auth.js';
-import { handleAccount, isTemplateId, cleanName, cleanComment, cleanTitle, normalizeState } from '../src/account.js';
+import { handleAccount, isTemplateId, cleanName, cleanComment, cleanTitle, normalizeState, normalizeBalanceState } from '../src/account.js';
 import { makeValidator, isAnonVoter } from '../src/votes.js';
 import { corsHeaders } from '../src/http.js';
 import { makeTestKey, googlePayload, makeD1 } from './helpers.js';
@@ -120,6 +120,26 @@ test('티어표 state 형식', () => {
   assert.equal(normalizeState(big).reason, 'state.size');
 });
 
+test('밸런스 투표 글 state 형식', () => {
+  const rows = (nerf, fair, buff) => ({ title: 'B', tiers: [
+    { label: 'nerf', color: '#e5484d', items: nerf }, { label: 'fair', color: '#b9ae95', items: fair }, { label: 'buff', color: '#57a7d8', items: buff }] });
+  const check = s => normalizeBalanceState(normalizeState(s).state, 'cards', keys);
+  assert.deepEqual(check(rows(['bash'], [], ['strike'])).state.tiers.map(t => [t.label, t.items]), [['nerf', ['bash']], ['fair', []], ['buff', ['strike']]]);
+  const upper = rows(['bash'], [], []);
+  upper.tiers[0].color = '#E5484D';
+  assert.equal(check(upper).state.tiers[0].color, '#e5484d');
+  assert.equal(check({ ...rows([], [], []), tiers: rows([], [], []).tiers.slice(0, 2) }).reason, 'state.tiers');
+  const swapped = rows([], [], []);
+  swapped.tiers.reverse();
+  assert.equal(check(swapped).reason, 'state.label');
+  const recolored = rows([], [], []);
+  recolored.tiers[1].color = '#000000';
+  assert.equal(check(recolored).reason, 'state.color');
+  assert.equal(check(rows(['bash'], ['bash'], [])).reason, 'state.items'); // 한 항목은 한 줄에만
+  assert.equal(check(rows(['anchor'], [], [])).reason, 'state.items'); // 다른 카테고리
+  assert.equal(check(rows(['nope'], [], [])).reason, 'state.items');
+});
+
 test('익명 voter: u_ 로 시작하면 받지 않고, 로그인 상태면 voter 를 보지 않는다', () => {
   const { validateBody } = makeValidator(['cards/bash']);
   const votes = [{ item: 'cards/bash', v: 'nerf' }];
@@ -133,7 +153,7 @@ test('익명 voter: u_ 로 시작하면 받지 않고, 로그인 상태면 voter
 
 // ---------- 경로 전체 (node:sqlite 로 만든 D1 대역) ----------
 
-const DB = await makeD1(['0001_init.sql', '0002_accounts.sql']);
+const DB = await makeD1(['0001_init.sql', '0002_accounts.sql', '0003_play.sql', '0004_gallery_kind_worldcup.sql']);
 
 test('계정·갤러리·댓글 흐름', { skip: !DB && 'node:sqlite 없음' }, async () => {
   const env = { DB, GOOGLE_CLIENT_ID: CLIENT_ID, ADMIN_SUBS: 'admin-sub, other', TEST_JWKS: JSON.stringify(key.jwks), ALLOWED_ORIGINS: 'http://localhost:8000' };
@@ -219,6 +239,41 @@ test('계정·갤러리·댓글 흐름', { skip: !DB && 'node:sqlite 없음' }, 
   const bob = await login('bob-sub', 'Bob');
   const B = bob.token;
   const p2 = (await call('POST', '/gallery', { token: B, body: { template: 'relics', title: 'bob', state } })).data.post;
+  assert.equal(post.kind, 'tier');
+  assert.equal(p2.kind, 'tier');
+
+  // 밸런스 투표 글: kind = 'balance', nerf/fair/buff 3줄
+  const bal = { title: 'b', tiers: [
+    { label: 'nerf', color: '#e5484d', items: ['bash'] }, { label: 'fair', color: '#b9ae95', items: [] }, { label: 'buff', color: '#57a7d8', items: ['strike'] }] };
+  const postBal = (body, token = A) => call('POST', '/gallery', { token, body: { template: 'cards.ironclad', title: '내 투표', kind: 'balance', state: bal, ...body } });
+  // (잘못된 요청은 B 로 보낸다: 글쓰기 속도 제한이 1분에 5번)
+  assert.equal((await postBal({ kind: 'poll' }, B)).data.reason, 'kind');
+  assert.equal((await postBal({ state }, B)).data.reason, 'state.tiers'); // 티어표 모양은 안 된다
+  assert.equal((await postBal({ template: 'relics' }, B)).data.reason, 'state.items'); // 다른 카테고리 항목
+  assert.equal((await postBal({ state: { ...bal, tiers: bal.tiers.map(t => ({ ...t, items: [] })) } }, B)).data.reason, 'empty');
+  r = await postBal({});
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const balPost = r.data.post;
+  assert.equal(balPost.kind, 'balance');
+  assert.deepEqual(balPost.state.tiers, bal.tiers);
+  assert.equal((await call('GET', `/gallery/${balPost.id}`)).data.post.kind, 'balance');
+  // kind 를 주지 않은 목록(예전 화면)에는 티어표만
+  assert.deepEqual((await call('GET', '/gallery')).data.posts.map(p => p.id), [p2.id, post.id]);
+  assert.deepEqual((await call('GET', '/gallery?kind=tier&template=cards')).data.posts.map(p => p.id), [post.id]);
+  assert.deepEqual((await call('GET', '/gallery?kind=balance')).data.posts.map(p => [p.id, p.kind]), [[balPost.id, 'balance']]);
+  assert.deepEqual((await call('GET', '/gallery?kind=balance&sort=top&template=cards.ironclad')).data.posts.map(p => p.id), [balPost.id]);
+  assert.deepEqual((await call('GET', `/gallery?kind=balance&author=${alice.user.id}`)).data.posts.map(p => p.id), [balPost.id]);
+  assert.deepEqual((await call('GET', '/gallery?kind=balance&template=cards')).data.posts, []);
+  assert.deepEqual((await call('GET', `/gallery?kind=balance&author=${bob.user.id}`)).data.posts, []);
+  assert.equal((await call('GET', '/gallery?kind=all')).data.reason, 'kind');
+  // 반응·댓글은 티어표 글과 같다
+  assert.deepEqual((await call('POST', `/gallery/${balPost.id}/react`, { token: B, body: { v: 1 } })).data, { likes: 1, dislikes: 0, myReaction: 1 });
+  assert.equal((await call('POST', `/gallery/${balPost.id}/comments`, { token: B, body: { body: '동의' } })).status, 200);
+  assert.equal((await call('GET', `/gallery/${balPost.id}`)).data.post.comments, 1);
+  assert.equal((await call('DELETE', `/gallery/${balPost.id}`, { token: B })).status, 403);
+  assert.equal((await call('DELETE', `/gallery/${balPost.id}`, { token: A })).data.ok, true);
+  assert.equal((await call('GET', `/gallery/${balPost.id}`)).status, 404);
+  assert.equal(DB.raw.prepare(`SELECT COUNT(*) n FROM comments WHERE target = ?`).get(`post:${balPost.id}`).n, 0);
 
   r = await call('GET', '/gallery');
   assert.deepEqual(r.data.posts.map(p => p.id), [p2.id, post.id]);

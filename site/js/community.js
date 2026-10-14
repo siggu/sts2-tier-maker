@@ -1,4 +1,4 @@
-// 로그인(구글), 투표·티어표 동기화, 티어표 갤러리, 좋아요/싫어요, 댓글, 항목별 댓글.
+// 로그인(구글), 투표·티어표 동기화, 갤러리(티어표·밸런스 투표), 좋아요/싫어요, 댓글, 항목별 댓글.
 // app.js 와 detail.js 가 아래 함수들을 부른다.
 // 로그인 기능이 꺼져 있으면(config.js 의 GOOGLE_CLIENT_ID 가 비어 있으면) 모두 아무것도 하지 않는다.
 // 사용자가 쓴 글(이름·제목·댓글)은 항상 글자 노드로 넣는다 (html 금지).
@@ -6,7 +6,7 @@
 import { t, lang } from './i18n.js';
 import { h, toast, board } from './ui.js';
 import { openDetail } from './detail.js';
-import { verdictsFor, loadMine, saveMine } from './balance.js';
+import { verdictsFor, loadMine, saveMine, loadSubmitted, unsubmittedChanges, fetchResults } from './balance.js';
 import { loadState, saveState, savedSummary, sanitize, setStorageHooks } from './tierlist.js';
 import { renderPng } from './export.js';
 import {
@@ -17,6 +17,10 @@ import {
 let ctxRef = null;
 const enc = encodeURIComponent;
 const VERDICT_KEYS = ['nerf', 'fair', 'buff'];
+// 갤러리 글 종류. 밸런스 투표 글은 티어표와 같은 state 모양에 줄 label 이 nerf/fair/buff, 색은 고정 (API.md).
+const KINDS = ['tier', 'balance'];
+const BALANCE_COLORS = { nerf: '#e5484d', fair: '#b9ae95', buff: '#57a7d8' };
+const kindOf = post => (post?.kind === 'balance' ? 'balance' : 'tier');
 const LIMITS = { title: 80, comment: 500, nameMin: 2, nameMax: 20, report: 200 };
 const strLen = s => [...s].length;
 // 경로 표시 등에 쓰는 짧은 제목
@@ -381,16 +385,19 @@ export function route(parts, params, ctx) {
   return false;
 }
 
-function galleryHref(tplId, { sort, author } = {}) {
+// kind 가 'tier' 면 주소에 넣지 않는다 (예전 주소 그대로)
+function galleryHref(tplId, { sort, author, kind } = {}) {
   const q = new URLSearchParams();
+  if (kind === 'balance') q.set('kind', kind);
   if (sort && sort !== 'new') q.set('sort', sort);
   if (author) q.set('author', author);
   const qs = q.toString();
   return `#/gallery${tplId ? `/${tplId}` : ''}${qs ? `?${qs}` : ''}`;
 }
 
-function galleryQuery({ template, sort, author, cursor }) {
+function galleryQuery({ kind, template, sort, author, cursor }) {
   const q = new URLSearchParams();
+  q.set('kind', kind === 'balance' ? 'balance' : 'tier');
   if (template) q.set('template', template);
   if (sort) q.set('sort', sort);
   if (author) q.set('author', author);
@@ -402,22 +409,81 @@ const tplLabel = tpl => (tpl.parts.length ? tpl.parts.map(p => p.label).join(' �
 
 // ================================================================ 갤러리 카드
 
-// 위쪽 줄 몇 개의 첫 항목 이미지로 만든 작은 미리보기
+// 밸런스 투표 글의 state → 판정 줄 3개 (label 은 그 카테고리의 판정 이름. 'nerf' 같은 값은 화면에 쓰지 않는다)
+function balanceRows(state, tpl) {
+  const src = Array.isArray(state?.tiers) ? state.tiers : [];
+  const seen = new Set();
+  return verdictsFor(tpl.category.id).map(v => {
+    const row = src.find(r => r && r.label === v.v);
+    const items = (Array.isArray(row?.items) ? row.items : []).filter(id => {
+      if (typeof id !== 'string' || !tpl.byId.has(id) || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    return { v: v.v, label: v.label, sub: v.sub, color: v.color, items };
+  });
+}
+
+function previewRow(label, color, ids, tpl) {
+  return h('div', { class: 'gal-prev-row', style: { '--tier': color } },
+    h('span', { class: 'gal-prev-label' }, label),
+    h('span', { class: 'gal-prev-items' }, ids.slice(0, 8).map(id => {
+      const item = tpl.byId.get(id);
+      return item?.img ? h('img', { src: item.img, alt: '', loading: 'lazy', decoding: 'async' }) : h('span', { class: 'gal-prev-dot' });
+    })),
+  );
+}
+
+// 위쪽 줄 몇 개의 첫 항목 이미지로 만든 작은 미리보기. 밸런스 투표는 너프/적당/버프 3줄을 늘 보인다.
 function preview(post, tpl) {
-  const state = tpl ? sanitize(post.state, tpl) : null;
-  const rows = (state?.tiers || []).filter(r => r.items.length).slice(0, 3);
-  const box = h('div', { class: `gal-prev kind-${tpl?.tile || 'card'}`, 'aria-hidden': 'true' });
-  if (!rows.length) { box.append(h('div', { class: 'gal-prev-empty' }, icon('grid'))); return box; }
-  for (const r of rows) {
-    box.append(h('div', { class: 'gal-prev-row', style: { '--tier': r.color } },
-      h('span', { class: 'gal-prev-label' }, r.label),
-      h('span', { class: 'gal-prev-items' }, r.items.slice(0, 8).map(id => {
-        const item = tpl.byId.get(id);
-        return item?.img ? h('img', { src: item.img, alt: '', loading: 'lazy', decoding: 'async' }) : h('span', { class: 'gal-prev-dot' });
-      })),
-    ));
+  const balance = kindOf(post) === 'balance' && tpl;
+  const box = h('div', { class: `gal-prev kind-${tpl?.tile || 'card'}${balance ? ' gal-prev-bal' : ''}`, 'aria-hidden': 'true' });
+  if (balance) {
+    const rows = balanceRows(post.state, tpl);
+    if (rows.some(r => r.items.length)) {
+      for (const r of rows) box.append(previewRow(t(`gallery.bal.short.${r.v}`), r.color, r.items, tpl));
+      return box;
+    }
   }
+  const state = tpl && !balance ? sanitize(post.state, tpl) : null;
+  const rows = (state?.tiers || []).filter(r => r.items.length).slice(0, 3);
+  if (!rows.length) { box.append(h('div', { class: 'gal-prev-empty' }, icon('grid'))); return box; }
+  for (const r of rows) box.append(previewRow(r.label, r.color, r.items, tpl));
   return box;
+}
+
+// ---- 모두의 결과와 비교 (밸런스 투표 글)
+
+// 카테고리별 결과를 한 번만 받는다. 받지 못하면 null.
+const resultsCache = new Map();
+function communityResults(categoryId) {
+  const hit = resultsCache.get(categoryId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.promise;
+  const promise = fetchResults(categoryId)
+    .then(items => (items && typeof items === 'object' ? items : null))
+    .catch(() => null);
+  resultsCache.set(categoryId, { at: Date.now(), promise });
+  return promise;
+}
+
+// 항목마다 글의 판정이 모두의 결과에서 가장 많은 판정(동률이면 그중 하나)과 같은지. 표가 없는 항목은 빼고 센다.
+function compareWithResults(rows, tpl, results) {
+  const marks = new Map();
+  let agree = 0;
+  for (const r of rows) {
+    const idx = VERDICT_KEYS.indexOf(r.v);
+    for (const id of r.items) {
+      const c = results?.[tpl.byId.get(id)?.key];
+      if (!Array.isArray(c)) continue;
+      const n = [0, 1, 2].map(i => Math.max(0, Number(c[i]) || 0));
+      if (!(n[0] + n[1] + n[2])) continue;
+      const ok = n[idx] === Math.max(...n);
+      marks.set(id, ok);
+      if (ok) agree++;
+    }
+  }
+  const compared = marks.size;
+  return { marks, agree, compared, pct: compared ? Math.round((agree / compared) * 100) : null };
 }
 
 function stat(ic, n, label, cls = '') {
@@ -426,11 +492,25 @@ function stat(ic, n, label, cls = '') {
 
 function galleryCard(post, db, { showTemplate = true } = {}) {
   const tpl = db.template(post.template);
-  return h('a', { class: 'gal-card', href: `#/g/${enc(post.id)}`, style: tpl?.group?.color ? { '--accent': tpl.group.color } : null },
+  // 밸런스 투표 글: 모두의 결과와 얼마나 같은지 (결과를 받지 못하면 줄을 숨긴 채 둔다)
+  let match = null;
+  if (kindOf(post) === 'balance' && tpl) {
+    match = h('span', { class: 'gal-card-match', hidden: true });
+    const rows = balanceRows(post.state, tpl);
+    communityResults(tpl.category.id).then(results => {
+      const cmp = results && compareWithResults(rows, tpl, results);
+      if (!cmp?.compared) return;
+      match.replaceChildren(h('i', { 'aria-hidden': 'true' }), t('gallery.bal.match', { n: cmp.pct }));
+      match.title = t('gallery.bal.matchDetail', { n: cmp.pct, agree: cmp.agree, compared: cmp.compared });
+      match.hidden = false;
+    });
+  }
+  return h('a', { class: `gal-card${match ? ' gal-card-bal' : ''}`, href: `#/g/${enc(post.id)}`, style: tpl?.group?.color ? { '--accent': tpl.group.color } : null },
     preview(post, tpl),
     h('div', { class: 'gal-card-body' },
       h('strong', { class: 'gal-card-title' }, post.title),
       showTemplate && h('span', { class: 'gal-card-tpl' }, tpl?.title || post.template),
+      match,
       h('div', { class: 'gal-card-author' },
         avatar(post.author, 'sm'),
         h('span', { class: 'gal-card-name' }, post.author?.name || '?'),
@@ -451,23 +531,37 @@ function skeletonCards(n) {
 
 // ================================================================ 갤러리 목록
 
+// 티어표 | 밸런스 투표 탭 (주소의 ?kind= 로 고른다)
+function kindTabs(current, hrefFor) {
+  return h('nav', { class: 'gal-tabs', 'aria-label': t('gallery.kind') },
+    KINDS.map(k => h('a', {
+      href: hrefFor(k), class: k === current ? 'on' : null, 'aria-current': k === current ? 'page' : null,
+    }, t(`gallery.kind.${k}`))));
+}
+
 function viewGallery(templateId, params, ctx) {
   const db = ctx.db;
   const template = templateId ? db.template(templateId) : null;
   if (templateId && !template) return ctx.notFound();
+  const kind = params.get('kind') === 'balance' ? 'balance' : 'tier';
+  const bal = kind === 'balance';
   const sort = params.get('sort') === 'top' ? 'top' : 'new';
   const author = params.get('author') || '';
   const me = currentUser();
   const mineView = Boolean(author && me && author === me.id);
   const token = ++viewToken;
+  // 종류마다 다른 문구 (밸런스 투표는 gallery.bal.*)
+  const k = key => t(bal ? `gallery.bal.${key}` : `gallery.${key}`);
+  const ownHref = bal ? (template ? `#/balance/${template.id}` : '#/balance') : (template ? `#/tier/${template.id}` : '#/');
+  const ownLabel = bal ? t('gallery.bal.voteOwn') : t('gallery.makeOwn');
 
-  const heading = h('h1', {}, template ? t('gallery.titleFor', { title: template.title }) : mineView ? t('gallery.mine') : author ? t('gallery.byAuthor') : t('gallery.title'));
+  const heading = h('h1', {}, template ? t(bal ? 'gallery.bal.titleFor' : 'gallery.titleFor', { title: template.title }) : mineView ? t('gallery.mine') : author ? k('byAuthor') : k('title'));
   const grid = h('div', { class: 'gal-grid', 'aria-busy': 'true' }, skeletonCards(6));
   const more = h('div', { class: 'gal-more' });
 
   const select = h('select', {
     class: 'gal-select', 'aria-label': t('gallery.filterTemplate'),
-    onchange: e => { location.hash = galleryHref(e.target.value || null, { sort, author }); },
+    onchange: e => { location.hash = galleryHref(e.target.value || null, { sort, author, kind }); },
   },
     h('option', { value: '' }, t('gallery.allTemplates')),
     db.categories.map(cat => {
@@ -479,31 +573,32 @@ function viewGallery(templateId, params, ctx) {
 
   const sortBtn = (key, label) => h('button', {
     type: 'button', class: sort === key ? 'on' : null, 'aria-pressed': String(sort === key),
-    onclick: () => { if (sort !== key) location.replace(galleryHref(templateId, { sort: key, author })); },
+    onclick: () => { if (sort !== key) location.replace(galleryHref(templateId, { sort: key, author, kind })); },
   }, label);
 
   const authorChip = author && h('span', { class: 'gal-filter-chip' },
-    h('span', { class: 'gal-author-name' }, mineView ? t('gallery.mineShort') : t('gallery.byAuthor')),
-    h('a', { href: galleryHref(templateId, { sort }), 'aria-label': t('gallery.clearAuthor') }, '×'));
+    h('span', { class: 'gal-author-name' }, mineView ? t('gallery.mineShort') : k('byAuthor')),
+    h('a', { href: galleryHref(templateId, { sort, kind }), 'aria-label': t('gallery.clearAuthor') }, '×'));
 
   const path = [];
-  if (template || author) path.push([t('gallery.nav'), '#/gallery']);
+  if (template || author) path.push([t('gallery.nav'), galleryHref(null, { kind })]);
   if (template) path.push([template.title]);
   else if (author) path.push([heading.textContent]);
   else path.push([t('gallery.nav')]);
 
   ctx.render(
-    ctx.crumbs('tier', ...path),
+    ctx.crumbs(kind, ...path),
     h('header', { class: 'page-head gal-head' },
       heading,
-      h('p', {}, template ? t('gallery.leadTemplate') : t('gallery.lead')),
+      h('p', {}, template ? k('leadTemplate') : k('lead')),
     ),
+    kindTabs(kind, x => galleryHref(templateId, { sort, author, kind: x })),
     h('div', { class: 'gal-controls' },
       h('div', { class: 'seg', role: 'group', 'aria-label': t('gallery.sort') },
         sortBtn('new', t('gallery.sortNew')), sortBtn('top', t('gallery.sortTop'))),
       select,
       authorChip,
-      template && h('a', { class: 'btn small', href: `#/tier/${template.id}` }, t('gallery.makeOwn')),
+      template && h('a', { class: 'btn small', href: ownHref }, ownLabel),
     ),
     grid,
     more,
@@ -515,7 +610,7 @@ function viewGallery(templateId, params, ctx) {
     more.replaceChildren();
     let data;
     try {
-      data = await api(galleryQuery({ template: templateId, sort, author, cursor }));
+      data = await api(galleryQuery({ kind, template: templateId, sort, author, cursor }));
     } catch (err) {
       if (token !== viewToken) return;
       grid.removeAttribute('aria-busy');
@@ -526,18 +621,19 @@ function viewGallery(templateId, params, ctx) {
     }
     if (token !== viewToken) return;
     grid.removeAttribute('aria-busy');
-    const posts = Array.isArray(data?.posts) ? data.posts : [];
+    // (kind 를 모르는 예전 서버가 섞어 보내도 이 탭의 글만)
+    const posts = (Array.isArray(data?.posts) ? data.posts : []).filter(p => kindOf(p) === kind);
     if (first) {
       grid.replaceChildren();
       if (author && !mineView && posts[0]?.author?.name) {
-        heading.textContent = t('gallery.byName', { name: posts[0].author.name });
+        heading.textContent = t(bal ? 'gallery.bal.byName' : 'gallery.byName', { name: posts[0].author.name });
         authorChip?.querySelector('.gal-author-name')?.replaceChildren(posts[0].author.name);
       }
       if (!posts.length) {
         grid.replaceChildren(h('section', { class: 'empty gal-empty' },
-          h('h2', {}, mineView ? t('gallery.emptyMine') : t('gallery.empty')),
-          h('p', {}, t('gallery.emptyBody')),
-          h('p', {}, h('a', { class: 'btn primary', href: template ? `#/tier/${template.id}` : '#/' }, t('gallery.makeOwn')))));
+          h('h2', {}, mineView ? k('emptyMine') : k('empty')),
+          h('p', {}, k('emptyBody')),
+          h('p', {}, h('a', { class: 'btn primary', href: ownHref }, ownLabel))));
       }
     }
     first = false;
@@ -572,15 +668,22 @@ async function viewPost(postId, ctx) {
     return;
   }
   if (token !== viewToken) return;
+  const kind = kindOf(post);
+  const bal = kind === 'balance';
+  const galHref = galleryHref(null, { kind });
   const tpl = db.template(post.template);
   if (!tpl) {
     ctx.render(
-      ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], [short(post.title)]),
-      h('section', { class: 'empty' }, h('h2', {}, t('gallery.templateGone')), h('p', {}, h('a', { class: 'btn', href: '#/gallery' }, t('gallery.back')))),
+      ctx.crumbs(kind, [t('gallery.nav'), galHref], [short(post.title)]),
+      h('section', { class: 'empty' }, h('h2', {}, t(bal ? 'gallery.bal.templateGone' : 'gallery.templateGone')), h('p', {}, h('a', { class: 'btn', href: galHref }, t('gallery.back')))),
     );
     return;
   }
-  const state = sanitize(post.state, tpl) || { title: post.title, tiers: [], updatedAt: 0 };
+  // 밸런스 투표 글은 판정 이름·설명·색으로 바꾼 3줄
+  const vrows = bal ? balanceRows(post.state, tpl) : null;
+  const state = bal
+    ? { title: post.title, tiers: vrows.map(r => ({ label: r.label, color: r.color, items: r.items })), updatedAt: 0 }
+    : sanitize(post.state, tpl) || { title: post.title, tiers: [], updatedAt: 0 };
   state.title = post.title || state.title;
   let busy = false;
 
@@ -631,7 +734,7 @@ async function viewPost(postId, ctx) {
     try {
       await api(`/gallery/${enc(post.id)}`, { method: 'DELETE' });
       toast(t('gallery.deleted'));
-      location.hash = `#/gallery/${tpl.id}`;
+      location.hash = galleryHref(tpl.id, { kind });
     } catch (err) { toast(errorText(err)); }
   }
 
@@ -669,10 +772,41 @@ async function viewPost(postId, ctx) {
     }
   }
 
+  // 밸런스 투표: 모두의 결과와 비교한 요약 줄과 항목마다 표시 (결과를 받지 못하면 둘 다 없음)
+  function decorateBalance(b, summary) {
+    communityResults(tpl.category.id).then(results => {
+      if (!results || !b.isConnected) return;
+      const cmp = compareWithResults(vrows, tpl, results);
+      if (!cmp.compared) return;
+      for (const el of b.querySelectorAll('.tile[data-id]')) {
+        const ok = cmp.marks.get(el.dataset.id);
+        if (ok === undefined) continue;
+        const label = ok ? t('gallery.bal.legendAgree') : t('gallery.bal.legendDiffer');
+        el.append(h('span', { class: `bal-mark ${ok ? 'agree' : 'differ'}`, title: label, 'aria-hidden': 'true' }, ok ? '✓' : t('gallery.bal.minority')));
+        el.setAttribute('aria-label', `${tpl.byId.get(el.dataset.id)?.name || ''} · ${label}`);
+      }
+      summary.replaceChildren(
+        h('strong', { class: 'bal-sum-pct' }, t('gallery.bal.matchDetail', { n: cmp.pct, agree: cmp.agree, compared: cmp.compared })),
+        h('span', { class: 'bal-sum-legend' },
+          h('span', { class: 'bal-mark agree', 'aria-hidden': 'true' }, '✓'), t('gallery.bal.legendAgree')),
+        h('span', { class: 'bal-sum-legend' },
+          h('span', { class: 'bal-mark differ', 'aria-hidden': 'true' }, t('gallery.bal.minority')), t('gallery.bal.legendDiffer')),
+        h('a', { class: 'bal-sum-link', href: `#/balance/${tpl.id}/results` }, t('gallery.bal.results'), ' ›'),
+      );
+      summary.hidden = false;
+    });
+  }
+
   function draw() {
     drawReactions();
     const author = post.author || {};
-    const b = board({ template: tpl, rows: state.tiers, readonly: true, onOpen: id => openDetail(tpl.byId.get(id), tpl.category, db) });
+    const rows = bal ? vrows.map(r => ({ label: r.label, sub: r.sub, color: r.color, items: r.items })) : state.tiers;
+    const b = board({ template: tpl, rows, readonly: true, onOpen: id => openDetail(tpl.byId.get(id), tpl.category, db) });
+    const summary = bal ? h('div', { class: 'bal-summary', hidden: true }) : null;
+    if (bal) {
+      b.classList.add('gal-bal-board');
+      decorateBalance(b, summary);
+    }
     const comments = commentsSection({
       listPath: `/gallery/${enc(post.id)}/comments`,
       postPath: `/gallery/${enc(post.id)}/comments`,
@@ -681,7 +815,7 @@ async function viewPost(postId, ctx) {
       onCount: n => { post.comments = n; },
     });
     ctx.render(
-      ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], [tpl.title, `#/gallery/${tpl.id}`], [short(post.title)]),
+      ctx.crumbs(kind, [t('gallery.nav'), galHref], [tpl.title, galleryHref(tpl.id, { kind })], [short(post.title)]),
       h('header', { class: 'gal-post-head' },
         h('h1', { class: 'shared-title' }, post.title),
         h('div', { class: 'gal-post-meta' },
@@ -690,20 +824,25 @@ async function viewPost(postId, ctx) {
           h('span', { class: 'gal-dot', 'aria-hidden': 'true' }, '·'),
           timeEl(post.created),
           h('span', { class: 'gal-dot', 'aria-hidden': 'true' }, '·'),
-          h('a', { class: 'gal-post-tpl', href: `#/tier/${tpl.id}` }, tpl.title),
+          h('a', { class: 'gal-post-tpl', href: bal ? `#/balance/${tpl.id}` : `#/tier/${tpl.id}` }, tpl.title),
+          bal && h('span', { class: 'gal-kind-badge' }, t('gallery.kind.balance')),
           post.hidden ? h('span', { class: 'gal-hidden-badge' }, t('gallery.hiddenBadge')) : null,
         ),
       ),
       h('div', { class: 'gal-post-bar' },
         h('div', { class: 'gal-react', role: 'group', 'aria-label': t('gallery.reactions') }, likeBtn, dislikeBtn),
         h('div', { class: 'actions' },
-          h('button', { class: 'btn primary', type: 'button', onclick: importMine }, t('shared.import')),
+          // 밸런스 투표 글은 티어 리스트로 가져올 수 없다 → 직접 투표하러 가기
+          bal
+            ? h('a', { class: 'btn primary', href: `#/balance/${tpl.id}` }, t('gallery.bal.voteOwn'))
+            : h('button', { class: 'btn primary', type: 'button', onclick: importMine }, t('shared.import')),
           h('button', { class: 'btn', type: 'button', onclick: savePng }, t('tier.savePng')),
           h('button', { class: 'btn', type: 'button', onclick: copyLink }, t('gallery.copyLink')),
-          !isMine(author) && h('button', { class: 'btn ghost small', type: 'button', onclick: () => reportDialog('post', post.id) }, icon('flag'), t('acct.report')),
+          !isMine(author) && h('button', { class: 'btn ghost small', type: 'button', onclick: () => reportDialog('post', post.id, kind) }, icon('flag'), t('acct.report')),
           canDelete(author) && h('button', { class: 'btn danger small', type: 'button', onclick: remove }, icon('trash'), t('acct.delete')),
         ),
       ),
+      summary,
       b,
       comments,
     );
@@ -713,7 +852,7 @@ async function viewPost(postId, ctx) {
 
 // ================================================================ 신고
 
-async function reportDialog(kind, id) {
+async function reportDialog(kind, id, postKind = 'tier') {
   if (!(await requireLogin(t('acct.reason.report')))) return;
   const REASONS = ['spam', 'abuse', 'inappropriate', 'other'];
   const detail = h('textarea', { rows: '3', maxlength: String(LIMITS.report), placeholder: t('acct.report.detailPlaceholder') });
@@ -732,7 +871,7 @@ async function reportDialog(kind, id) {
       send.disabled = false;
     }
   } },
-    h('p', { class: 'acct-help' }, kind === 'post' ? t('acct.report.leadPost') : t('acct.report.leadComment')),
+    h('p', { class: 'acct-help' }, kind === 'post' ? t(postKind === 'balance' ? 'acct.report.leadBalance' : 'acct.report.leadPost') : t('acct.report.leadComment')),
     h('fieldset', { class: 'acct-radios' },
       h('legend', { class: 'sr-only' }, t('acct.report.reason')),
       REASONS.map((r, i) => h('label', {}, h('input', { type: 'radio', name: 'reason', value: r, checked: i === 0 }), h('span', {}, t(`acct.report.r.${r}`))))),
@@ -988,41 +1127,68 @@ async function publish(template, state) {
   input.select();
 }
 
-// 홈 화면: 갤러리 인기·최신 글
+// 홈 화면: 갤러리 인기·최신 글. 티어 메이커 홈은 티어표, 밸런스 투표 홈은 밸런스 투표 탭부터.
 const homeCache = new Map();
 export function homeBlocks(mode, ctx) {
-  if (mode !== 'tier' || !loginEnabled()) return [];
+  if ((mode !== 'tier' && mode !== 'balance') || !loginEnabled()) return [];
   ctxRef = ctxRef || ctx;
   let sort = 'top';
+  let kind = mode;
+  let firstLoad = true;
   const grid = h('div', { class: 'gal-strip', 'aria-busy': 'true' }, skeletonCards(4));
+  const tabs = h('div', { class: 'seg gal-home-kind', role: 'group', 'aria-label': t('gallery.kind') });
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': t('gallery.sort') });
+  const all = h('a', { class: 'gal-home-all' });
   const sec = h('section', { class: 'block gal-home' },
     h('div', { class: 'gal-home-head' },
       h('h2', { class: 'block-title' }, t('gallery.homeTitle')),
+      tabs,
       seg,
-      h('a', { class: 'gal-home-all', href: '#/gallery' }, t('gallery.seeAll'), ' ›')),
+      all),
     grid,
   );
+  const segButtons = (box, options, current, pick) => box.replaceChildren(...options.map(([k, label]) =>
+    h('button', { type: 'button', class: current === k ? 'on' : null, 'aria-pressed': String(current === k), onclick: () => { if (current !== k) pick(k); } }, label)));
   function drawSeg() {
-    seg.replaceChildren(...[['top', t('gallery.sortTop')], ['new', t('gallery.sortNew')]].map(([k, label]) =>
-      h('button', { type: 'button', class: sort === k ? 'on' : null, 'aria-pressed': String(sort === k), onclick: () => { if (sort !== k) { sort = k; drawSeg(); load(); } } }, label)));
+    segButtons(tabs, KINDS.map(k => [k, t(`gallery.kind.${k}`)]), kind, k => { kind = k; drawSeg(); load(); });
+    segButtons(seg, [['top', t('gallery.sortTop')], ['new', t('gallery.sortNew')]], sort, k => { sort = k; drawSeg(); load(); });
+    all.replaceChildren(t('gallery.seeAll'), ' ›');
+    all.href = galleryHref(null, { kind });
+  }
+  async function fetchPosts(k, s) {
+    const key = `${k}:${s}`;
+    const hit = homeCache.get(key);
+    if (hit && Date.now() - hit.at < 60_000) return hit.posts;
+    const data = await api(galleryQuery({ kind: k, sort: s }));
+    const posts = (Array.isArray(data?.posts) ? data.posts : []).filter(p => kindOf(p) === k);
+    homeCache.set(key, { at: Date.now(), posts });
+    return posts;
   }
   async function load() {
+    const want = `${kind}:${sort}`;
     let posts;
-    const hit = homeCache.get(sort);
-    if (hit && Date.now() - hit.at < 60_000) posts = hit.posts;
-    else {
-      try {
-        const data = await api(galleryQuery({ sort }));
-        posts = Array.isArray(data?.posts) ? data.posts : [];
-        homeCache.set(sort, { at: Date.now(), posts });
-      } catch {
-        sec.remove(); // 서버에 닿지 못하면 조용히 숨긴다
-        return;
+    try {
+      posts = await fetchPosts(kind, sort);
+      // 처음 고른 탭이 비어 있으면 다른 탭을 보여 준다. 둘 다 비면 구역을 숨긴다.
+      if (firstLoad && !posts.length) {
+        const other = KINDS.find(k => k !== kind);
+        const alt = await fetchPosts(other, sort);
+        if (alt.length) { kind = other; posts = alt; drawSeg(); }
       }
+    } catch {
+      if (firstLoad) sec.remove(); // 서버에 닿지 못하면 조용히 숨긴다
+      else grid.replaceChildren(h('p', { class: 'gal-strip-note' }, t('gallery.loadFailed')));
+      return;
     }
-    if (!posts.length) { sec.remove(); return; }
+    if (want !== `${kind}:${sort}` && !firstLoad) return; // 그사이 다른 탭을 눌렀다
+    const wasFirst = firstLoad;
+    firstLoad = false;
+    if (!posts.length && wasFirst) { sec.remove(); return; }
     grid.removeAttribute('aria-busy');
+    if (!posts.length) {
+      grid.replaceChildren(h('p', { class: 'gal-strip-note' }, t(kind === 'balance' ? 'gallery.bal.empty' : 'gallery.empty')));
+      return;
+    }
     grid.replaceChildren(...posts.slice(0, 8).map(p => galleryCard(p, ctx.db)));
   }
   drawSeg();
@@ -1047,5 +1213,83 @@ export function detailExtras(item, category, db) { // eslint-disable-line no-unu
   return el;
 }
 
-// 밸런스 투표 화면의 버튼 (갤러리에 밸런스 투표 공개). (account 에이전트가 구현)
-export function balanceActions(template, ctx) { return null; } // eslint-disable-line no-unused-vars
+// 밸런스 투표 화면의 버튼: 제출한 투표를 갤러리에 공개 / 이 묶음의 밸런스 투표 갤러리
+export function balanceActions(template, ctx) {
+  if (!loginEnabled()) return null;
+  ctxRef = ctxRef || ctx;
+  return [
+    h('button', { class: 'btn', type: 'button', onclick: () => publishBalance(template) }, t('gallery.publish')),
+    h('a', { class: 'btn ghost', href: galleryHref(template.id, { kind: 'balance' }) }, t('gallery.browse')),
+  ];
+}
+
+// 알림 창 (확인 버튼 하나)
+function notice(title, text) {
+  const ok = h('button', { class: 'btn primary', type: 'button', onclick: () => m.close() }, t('gallery.bal.ok'));
+  const m = openModal({
+    title, className: 'acct-small',
+    body: h('div', { class: 'acct-form' }, h('p', { class: 'acct-help' }, text), h('div', { class: 'acct-form-actions' }, ok)),
+  });
+  ok.focus();
+}
+
+// 이 묶음에서 제출한 표 → 공개할 state 의 줄 3개 (줄 안 순서는 투표 화면의 순서)
+function submittedRows(template) {
+  const catId = template.category.id;
+  const submitted = loadSubmitted(catId);
+  const draft = loadMine(catId);
+  const seen = new Set();
+  return VERDICT_KEYS.map(v => {
+    const order = [...(Array.isArray(draft[v]) ? draft[v] : []), ...template.items.map(i => i.id)];
+    const items = order.filter(id => {
+      if (!template.byId.has(id) || submitted[id] !== v || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    return { label: v, color: BALANCE_COLORS[v], items };
+  });
+}
+
+async function publishBalance(template) {
+  const catId = template.category.id;
+  const wasIn = Boolean(currentUser());
+  if (!(await requireLogin(t('acct.reason.publishBalance')))) return;
+  if (!wasIn) await runSync(); // 방금 로그인했으면 계정의 표를 받아 온 뒤에 본다
+  const changes = unsubmittedChanges(catId, loadMine(catId), template.items.map(i => i.id));
+  const button = t('balance.submit');
+  if (changes.length) { notice(t('gallery.bal.unsubmittedTitle'), t('gallery.bal.unsubmitted', { n: changes.length, button })); return; }
+  const tiers = submittedRows(template);
+  const placed = tiers.reduce((n, r) => n + r.items.length, 0);
+  if (!placed) { notice(t('gallery.bal.nothingTitle'), t('gallery.bal.nothing', { button })); return; }
+
+  const defTitle = [...t('gallery.bal.defaultTitle', { title: template.title })].slice(0, LIMITS.title).join('');
+  const input = h('input', { type: 'text', value: defTitle, maxlength: String(LIMITS.title), required: true });
+  const go = h('button', { class: 'btn primary', type: 'submit' }, t('gallery.publishGo'));
+  const form = h('form', { class: 'acct-form', onsubmit: async e => {
+    e.preventDefault();
+    const title = input.value.trim();
+    if (!title || strLen(title) > LIMITS.title) { input.focus(); return; }
+    go.disabled = true;
+    try {
+      const res = await api('/gallery', { method: 'POST', body: { kind: 'balance', template: template.id, title, state: { title, tiers } } });
+      const id = res?.post?.id;
+      m.close();
+      toast(t('gallery.published'));
+      homeCache.clear();
+      location.hash = id ? `#/g/${enc(id)}` : galleryHref(template.id, { kind: 'balance' });
+    } catch (err) {
+      toast(errorText(err));
+      go.disabled = false;
+    }
+  } },
+    h('div', { class: 'gal-publish-prev' }, preview({ kind: 'balance', state: { tiers } }, template),
+      h('p', { class: 'muted' }, template.title, h('br'), t('gallery.bal.publishStats', { n: placed, total: template.items.length }))),
+    h('label', { class: 'field' }, h('span', {}, t('gallery.postTitle')), input),
+    h('p', { class: 'acct-help' }, t('gallery.bal.publishNote')),
+    h('div', { class: 'acct-form-actions' },
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => m.close() }, t('acct.cancel')),
+      go),
+  );
+  const m = openModal({ title: t('gallery.bal.publishTitle'), body: form, className: 'acct-small' });
+  input.select();
+}

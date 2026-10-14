@@ -20,6 +20,13 @@ const ITEM_ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const ID_RE = /^[0-9a-f]{24}$/;      // 글·댓글 id (12바이트 hex)
 const USER_ID_RE = /^[0-9a-f]{32}$/;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+// 갤러리 글 종류. 'balance' 글은 밸런스 투표(너프/적당/버프 3줄, 색 고정)를 티어표와 같은 모양으로 담는다.
+const POST_KINDS = ['tier', 'balance'];
+export const BALANCE_ROWS = [
+  { label: 'nerf', color: '#e5484d' },
+  { label: 'fair', color: '#b9ae95' },
+  { label: 'buff', color: '#57a7d8' },
+];
 // 제어 문자와 글자 방향 바꾸기 문자(이름·댓글로 화면을 속이지 못하게). 줄바꿈은 따로 다룬다.
 const UNSAFE_CHARS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩﻿]/g;
 
@@ -150,6 +157,23 @@ export function normalizeState(s) {
   return { state };
 }
 
+// 밸런스 투표 글의 state 검사: 정확히 nerf/fair/buff 3줄(정해진 색), 항목은 겹치지 않고 그 카테고리에 있는 것.
+// normalizeState 를 통과한 state 를 받는다. → { state } | { reason }
+export function normalizeBalanceState(state, category, keys) {
+  if (state.tiers.length !== BALANCE_ROWS.length) return { reason: 'state.tiers' };
+  const seen = new Set();
+  for (let i = 0; i < BALANCE_ROWS.length; i++) {
+    const t = state.tiers[i];
+    if (t.label !== BALANCE_ROWS[i].label) return { reason: 'state.label' };
+    if (t.color.toLowerCase() !== BALANCE_ROWS[i].color) return { reason: 'state.color' };
+    for (const id of t.items) {
+      if (seen.has(id) || !keys.has(`${category}/${id}`)) return { reason: 'state.items' };
+      seen.add(id);
+    }
+  }
+  return { state: { ...state, tiers: state.tiers.map((t, i) => ({ ...t, color: BALANCE_ROWS[i].color })) } };
+}
+
 // 구글 이름 앞부분으로 처음 이름을 정한다. 너무 짧으면 무작위 이름.
 function initialName(payload) {
   const raw = typeof payload.name === 'string' ? payload.name : '';
@@ -262,12 +286,13 @@ async function deleteTier(c, template) {
 
 // ---------- 갤러리 ----------
 
-const POST_COLUMNS = `p.id, p.user_id, p.template, p.title, p.state, p.created, p.likes, p.dislikes, p.comments, p.hidden,
+const POST_COLUMNS = `p.id, p.user_id, p.kind, p.template, p.title, p.state, p.created, p.likes, p.dislikes, p.comments, p.hidden,
   u.name AS a_name, u.picture AS a_picture`;
 
 function postOut(r) {
   return {
     id: r.id,
+    kind: r.kind || 'tier',
     template: r.template,
     title: r.title,
     state: parseState(r.state),
@@ -300,10 +325,13 @@ async function createPost(c) {
   if (await limited(c, 'post')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, MAX_BODY_BYTES);
   if (res) return res;
+  const kind = body.kind ?? 'tier';
+  if (!POST_KINDS.includes(kind)) return bad(c, 'kind');
   if (!isTemplateId(body.template, c.keys)) return bad(c, 'template');
   const title = cleanTitle(body.title);
   if (!title) return bad(c, 'title');
-  const { state, reason } = normalizeState(body.state);
+  let { state, reason } = normalizeState(body.state);
+  if (state && kind === 'balance') ({ state, reason } = normalizeBalanceState(state, body.template.split('.')[0], c.keys));
   if (!state) return reason === 'state.size' ? c.send({ error: 'too_large' }, 413) : bad(c, reason);
   if (!state.tiers.some(t => t.items.length)) return bad(c, 'empty');
 
@@ -315,17 +343,18 @@ async function createPost(c) {
   const id = randomHex(12);
   state.updatedAt = now;
   await env.DB.prepare(
-    `INSERT INTO posts (id, user_id, template, title, state, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
-  ).bind(id, user.id, body.template, title, JSON.stringify(state), now).run();
+    `INSERT INTO posts (id, user_id, kind, template, title, state, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+  ).bind(id, user.id, kind, body.template, title, JSON.stringify(state), now).run();
   return c.send({
     post: {
-      id, template: body.template, title, state, author: { id: user.id, name: user.name, picture: user.picture },
+      id, kind, template: body.template, title, state, author: { id: user.id, name: user.name, picture: user.picture },
       created: now, likes: 0, dislikes: 0, comments: 0, myReaction: 0, hidden: false,
     },
   });
 }
 
 // cursor 는 마지막 글의 정렬 키: new → 'created:id', top → 'score:created:id'
+// kind 를 주지 않으면 티어표만 (kind 를 모르는 예전 화면이 밸런스 글을 티어표로 그리지 않게).
 async function listPosts(c) {
   const { env, url } = c;
   c.user = await getUser(c.request, env);
@@ -334,13 +363,15 @@ async function listPosts(c) {
   const author = q.get('author') || null;
   const sort = q.get('sort') || 'new';
   const cursor = q.get('cursor') || null;
+  const kind = q.get('kind') || 'tier';
+  if (!POST_KINDS.includes(kind)) return bad(c, 'kind');
   if (template && !isTemplateId(template, c.keys)) return bad(c, 'template');
   if (author && !USER_ID_RE.test(author)) return bad(c, 'author');
   if (sort !== 'new' && sort !== 'top') return bad(c, 'sort');
 
   // WHERE 는 고정된 조각만 이어 붙이고 값은 모두 bind 로 넘긴다
-  const where = [];
-  const params = [c.user?.id ?? ''];
+  const where = ['p.kind = ?'];
+  const params = [c.user?.id ?? '', kind];
   if (template) { where.push('p.template = ?'); params.push(template); }
   if (author) { where.push('p.user_id = ?'); params.push(author); }
   if (!c.user?.admin) { where.push('(p.hidden = 0 OR p.user_id = ?)'); params.push(c.user?.id ?? ''); }
@@ -359,7 +390,7 @@ async function listPosts(c) {
   const { results } = await env.DB.prepare(
     `SELECT ${POST_COLUMNS}, COALESCE(r.v, 0) AS my FROM posts p JOIN users u ON u.id = p.user_id
      LEFT JOIN reactions r ON r.post_id = p.id AND r.user_id = ?
-     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     WHERE ${where.join(' AND ')}
      ORDER BY ${order} LIMIT ${PAGE_SIZE + 1}`
   ).bind(...params).all();
 
