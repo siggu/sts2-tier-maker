@@ -507,7 +507,7 @@ async function main() {
   const failed = new Set(imageJobs.filter(j => j.failed).map(j => j.out));
   for (const cat of categories) {
     for (const item of cat.items) {
-      for (const key of ['img', 'icon']) {
+      for (const key of ['img', 'imgUp']) {
         if (item[key] && failed.has(join(ROOT, 'site', item[key]))) delete item[key];
         if (item[key] === null || item[key] === undefined) delete item[key];
       }
