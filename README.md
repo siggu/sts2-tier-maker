@@ -18,7 +18,7 @@ Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리�
 ## 처음 설정
 
 1. **Settings → Pages → Source**를 `GitHub Actions`로 바꿉니다.
-2. 투표 API를 쓰려면 **Settings → Secrets and variables → Actions**에 `CLOUDFLARE_API_TOKEN`(Workers·D1 편집 권한), `CLOUDFLARE_ACCOUNT_ID`를 넣습니다. 첫 배포 때 D1 데이터베이스 `sts2-balance`가 자동으로 만들어집니다.
+2. 투표 API를 쓰려면 **Settings → Secrets and variables → Actions**에 `CLOUDFLARE_API_TOKEN`(Workers 스크립트·D1 편집 권한)을 넣습니다. 계정 ID는 `api/wrangler.toml`의 `account_id`에 있습니다. 첫 배포 때 D1 데이터베이스 `sts2-balance`가 자동으로 만들어집니다.
 
 ## 로컬 실행
 

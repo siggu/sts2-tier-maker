@@ -27,7 +27,7 @@ jobs:
         working-directory: api
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # 계정 ID 는 wrangler.toml 의 account_id 를 쓴다.
     steps:
       - uses: actions/checkout@v4
 
@@ -43,8 +43,8 @@ jobs:
       - name: Cloudflare 시크릿 확인
         id: secrets
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID 시크릿이 없어 배포를 건너뜁니다."
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN 시크릿이 없어 배포를 건너뜁니다."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -56,7 +56,7 @@ jobs:
           find_id() {
             if ! out="$(npx wrangler d1 list --json 2>&1)"; then
               echo "$out" >&2
-              echo >&2 "::error::Cloudflare D1 목록을 읽지 못했습니다. API 토큰에 'Account · D1 · Edit' 권한이 있는지, CLOUDFLARE_ACCOUNT_ID 가 토큰의 계정과 같은지 확인하세요."
+              echo >&2 "::error::Cloudflare D1 목록을 읽지 못했습니다. API 토큰에 'Account · D1 · Edit' 권한이 있는지, api/wrangler.toml 의 account_id 가 토큰의 계정과 같은지 확인하세요."
               return 1
             fi
             # wrangler 가 JSON 앞뒤로 안내 문구를 찍을 수 있어 배열 부분만 읽는다.
