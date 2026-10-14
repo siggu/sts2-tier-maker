@@ -8,7 +8,7 @@ import {
 } from './tierlist.js';
 import { renderPng } from './export.js';
 import { openDetail, closeDetail } from './detail.js';
-import { verdictsFor, loadMine, saveMine, queueVote, onSyncStatus, fetchResults, flush } from './balance.js';
+import { verdictsFor, loadMine, saveMine, unsubmittedChanges, submitChanges, onSyncStatus, fetchResults, flush } from './balance.js';
 
 const app = document.getElementById('app');
 let db = null;
@@ -232,15 +232,17 @@ function boardHeader(mode, template) {
   return crumbs(mode, ...path);
 }
 
-const HINT_KEY = 'sts2.hint.v1';
+// 밸런스 투표는 제출 방식이 바뀌어 안내를 따로(새로) 보여 준다.
+const HINT_KEYS = { tier: 'sts2.hint.v1', balance: 'sts2.hint.balance.v2' };
 function usageHint(mode) {
+  const HINT_KEY = HINT_KEYS[mode];
   try { if (localStorage.getItem(HINT_KEY)) return null; } catch { /* 저장소 없음 */ }
   const el = h('div', { class: 'hint' },
     h('div', {},
       h('strong', {}, '사용법 '),
       '항목을 원하는 줄로 끌어다 놓으세요. 모바일에서는 항목을 탭한 뒤 놓을 줄을 탭하면 됩니다. ',
       '항목을 더블클릭(모바일은 탭 후 "자세히")하면 효과와 강화 정보를 볼 수 있습니다.',
-      mode === 'balance' ? ' 놓는 순간 투표되고, 아래로 다시 빼면 취소됩니다.' : ''),
+      mode === 'balance' ? ' 옮긴 내용은 이 기기에 임시 저장되고, "투표 완료"를 눌러야 모두의 결과에 반영됩니다.' : ''),
     h('button', { class: 'btn ghost small', onclick: () => { try { localStorage.setItem(HINT_KEY, '1'); } catch { /* 무시 */ } el.remove(); } }, '알겠어요'),
   );
   return el;
@@ -435,10 +437,10 @@ function popover(anchor, content, onClose) {
 // ---------------------------------------------------------------- 밸런스 투표
 
 const SYNC_TEXT = {
-  pending: '저장 대기 중',
-  saving: '저장 중…',
-  saved: '모두 저장됨',
-  offline: '서버에 연결하지 못해 이 기기에 보관 중 (자동 재시도)',
+  pending: '제출 대기 중',
+  saving: '제출 중…',
+  saved: '',
+  offline: '서버에 연결하지 못했습니다. 이 기기에 보관해 두고 자동으로 다시 보냅니다.',
 };
 
 function viewBalance(templateId) {
@@ -461,7 +463,6 @@ function viewBalance(templateId) {
   }
 
   function move(id, to, index) {
-    const item = template.byId.get(id);
     // 카테고리 단위로 저장하므로 다른 템플릿의 아이템 순서는 건드리지 않는다
     for (const v of VERDICTS) mine[v.v] = mine[v.v].filter(x => x !== id);
     if (to >= 0) {
@@ -471,8 +472,8 @@ function viewBalance(templateId) {
       visible.splice(index == null ? visible.length : Math.min(index, visible.length), 0, id);
       mine[key] = [...others, ...visible];
     }
+    // 옮기기만 해서는 투표되지 않는다. 이 기기에 임시 저장하고, '투표 완료'를 눌러야 제출된다.
     saveMine(catId, mine);
-    queueVote(item.key, to >= 0 ? VERDICTS[to].v : null);
     const scrollY = window.scrollY;
     draw();
     window.scrollTo(0, scrollY);
@@ -484,12 +485,26 @@ function viewBalance(templateId) {
     const pool = template.items.filter(i => !placed.has(i.id)).map(i => i.id);
     const controls = poolControls(template, filter, () => applyFilter(poolEl, template, filter));
     const b = board({
-      template, rows, pool: { items: pool, controls }, onMove: move, poolTitle: '아직 투표하지 않은 항목',
+      template, rows, pool: { items: pool, controls }, onMove: move, poolTitle: '아직 분류하지 않은 항목',
       onOpen: id => openDetail(template.byId.get(id), template.category, db),
     });
     const poolEl = b.querySelector('.pool');
     applyFilter(poolEl, template, filter);
     statusEl.textContent = syncText;
+
+    const changes = unsubmittedChanges(catId, mine, template.items.map(i => i.id));
+    const submitting = statusEl.dataset.state === 'saving';
+    let submitBtn;
+    if (changes.length) {
+      submitBtn = h('button', { class: 'btn primary submit', disabled: submitting, onclick: submit }, `투표 완료 · 변경 ${changes.length}개 제출`);
+    } else if (placed.size) {
+      submitBtn = h('button', { class: 'btn submit done', disabled: true }, '✓ 투표 완료됨');
+    } else {
+      submitBtn = h('button', { class: 'btn submit', disabled: true }, '투표 완료');
+    }
+    const draftNote = changes.length
+      ? h('span', { class: 'draft-note' }, `임시 저장됨 · 아직 제출하지 않은 변경 ${changes.length}개`)
+      : placed.size ? h('span', { class: 'draft-note ok' }, '제출한 표와 같습니다') : null;
 
     render(
       boardHeader('balance', template),
@@ -498,16 +513,28 @@ function viewBalance(templateId) {
           h('h1', { class: 'board-h1' }, `${template.title}`),
           h('div', { class: 'board-progress' },
             progressBar(placed.size, template.items.length),
-            h('span', {}, `${placed.size} / ${template.items.length} 투표`),
+            h('span', {}, `${placed.size} / ${template.items.length} 분류`),
+            draftNote,
             statusEl),
         ),
         h('div', { class: 'actions' },
-          h('a', { class: 'btn primary', href: `#/balance/${template.id}/results` }, '모두의 결과 보기'),
+          submitBtn,
+          h('a', { class: 'btn', href: `#/balance/${template.id}/results` }, '모두의 결과'),
         ),
       ),
       usageHint('balance'),
       b,
     );
+  }
+
+  async function submit() {
+    const changes = unsubmittedChanges(catId, mine, template.items.map(i => i.id));
+    if (!changes.length) return;
+    const ok = await submitChanges(catId, changes, id => template.byId.get(id).key);
+    toast(ok ? `투표 ${changes.length}개를 제출했습니다` : '서버에 연결하지 못했습니다. 이 기기에 보관해 두고 자동으로 다시 보냅니다.');
+    const scrollY = window.scrollY;
+    draw();
+    window.scrollTo(0, scrollY);
   }
 
   draw();

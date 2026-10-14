@@ -1,4 +1,5 @@
-// 밸런스 투표: 내 표는 브라우저에 저장하고, 바뀐 것만 모아 서버로 보낸다.
+// 밸런스 투표: 끌어다 놓은 내용은 브라우저에 임시 저장(초안)하고,
+// '투표 완료'를 누르면 마지막으로 제출한 것과 달라진 표만 서버로 보낸다.
 
 const override = new URLSearchParams(location.search).get('api');
 export const API_BASE = override || 'https://sts2-balance-api.siggu100.workers.dev';
@@ -25,6 +26,7 @@ export function verdictsFor(categoryId) {
 }
 
 const MINE_KEY = cat => `sts2bal.v1.${cat}`;
+const SUBMITTED_KEY = cat => `sts2bal.v1.submitted.${cat}`;
 const PENDING_KEY = 'sts2bal.pending';
 const VOTER_KEY = 'sts2bal.voter';
 
@@ -60,6 +62,47 @@ export function saveMine(categoryId, rows) {
   write(MINE_KEY(categoryId), rows);
 }
 
+// 줄별 배열 → { 아이템id: 판정 }
+export function verdictMap(rows) {
+  const map = {};
+  for (const [v, ids] of Object.entries(rows)) for (const id of ids) map[id] = v;
+  return map;
+}
+
+// 마지막으로 제출한 표. 제출 버튼이 생기기 전에는 놓는 즉시 보냈으므로,
+// 기록이 없으면 지금 초안을 이미 제출한 것으로 본다.
+export function loadSubmitted(categoryId) {
+  const saved = read(SUBMITTED_KEY(categoryId), null);
+  if (saved && typeof saved === 'object') return saved;
+  const legacy = verdictMap(loadMine(categoryId));
+  write(SUBMITTED_KEY(categoryId), legacy);
+  return legacy;
+}
+
+// 초안과 제출본이 다른 아이템: [{ id, v }] (v 가 null 이면 표 취소)
+export function unsubmittedChanges(categoryId, rows, ids) {
+  const draft = verdictMap(rows);
+  const submitted = loadSubmitted(categoryId);
+  const out = [];
+  for (const id of ids) {
+    const a = draft[id] ?? null, b = submitted[id] ?? null;
+    if (a !== b) out.push({ id, v: a });
+  }
+  return out;
+}
+
+// 바뀐 표를 보내고 제출본을 갱신한다. 서버에 닿지 못해도 대기열에 남아 자동으로 다시 보낸다.
+export async function submitChanges(categoryId, changes, keyOf) {
+  if (!changes.length) return true;
+  for (const { id, v } of changes) queueVote(keyOf(id), v, { auto: false });
+  const submitted = loadSubmitted(categoryId);
+  for (const { id, v } of changes) {
+    if (v) submitted[id] = v; else delete submitted[id];
+  }
+  write(SUBMITTED_KEY(categoryId), submitted);
+  return flush();
+}
+
 // ---- 서버 동기화 ----
 
 let timer = null;
@@ -67,19 +110,21 @@ let listeners = new Set();
 export function onSyncStatus(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 function emit(status) { for (const fn of listeners) fn(status); }
 
-export function queueVote(itemKey, v) {
+function queueVote(itemKey, v, { auto = true } = {}) {
   const pending = read(PENDING_KEY, {});
   pending[itemKey] = v;
   write(PENDING_KEY, pending);
   emit('pending');
   clearTimeout(timer);
-  timer = setTimeout(flush, 1200);
+  if (auto) timer = setTimeout(flush, 1200);
 }
 
+// 대기열을 보낸다. 모두 보냈으면 true.
 export async function flush() {
+  clearTimeout(timer);
   const pending = read(PENDING_KEY, {});
   const entries = Object.entries(pending);
-  if (!entries.length) return;
+  if (!entries.length) return true;
   emit('saving');
   try {
     const res = await fetch(`${API_BASE}/balance`, {
@@ -94,12 +139,17 @@ export async function flush() {
     for (const [k, v] of entries.slice(0, 300)) if (now[k] === v) delete now[k];
     write(PENDING_KEY, now);
     emit(Object.keys(now).length ? 'pending' : 'saved');
-    if (Object.keys(now).length) timer = setTimeout(flush, 1200);
+    if (Object.keys(now).length) { timer = setTimeout(flush, 1200); return false; }
+    return true;
   } catch {
     emit('offline');
     timer = setTimeout(flush, 15000);
+    return false;
   }
 }
+
+// 예전에 보내지 못한 표가 남아 있으면 페이지를 열 때 다시 보낸다.
+if (Object.keys(read(PENDING_KEY, {})).length) setTimeout(flush, 2000);
 
 window.addEventListener('pagehide', () => { flush(); });
 
