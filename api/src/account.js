@@ -490,7 +490,7 @@ async function addComment(c, target, item = null) {
 async function listPostComments(c, id) {
   c.user = await getUser(c.request, c.env);
   if (!(await findPost(c, id))) return notFound(c);
-  return listComments(c, `post:${id}`, { order: 'c.created ASC, c.id ASC' });
+  return listComments(c, `post:${id}`, { order: 'c.created ASC, c.rowid ASC' });
 }
 
 async function addPostComment(c, id) {
@@ -509,7 +509,7 @@ async function listItemComments(c, category, id) {
   if (!item) return notFound(c);
   const sort = c.url.searchParams.get('sort') || 'new';
   if (sort !== 'new' && sort !== 'top') return bad(c, 'sort');
-  const order = sort === 'top' ? 'c.likes DESC, c.created DESC, c.id DESC' : 'c.created DESC, c.id DESC';
+  const order = sort === 'top' ? 'c.likes DESC, c.created DESC, c.rowid DESC' : 'c.created DESC, c.rowid DESC';
   return listComments(c, `item:${item}`, { item, order });
 }
 
