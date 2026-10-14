@@ -69,12 +69,14 @@ export function slug(name) {
 
 const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-// 위키 표기 → 툴팁용 HTML
-//   [6|9]      → 6 + 강화 수치 강조
+// 위키 표기 → 툴팁·상세 정보용 HTML
+//   [6|9]      → mode 'both': 6(9), 'base': 강화로 바뀔 6 표시, 'up': 강화 후 9 강조
 //   $Block     → 키워드 강조
 //   @IE @CE …  → 에너지/별 아이콘 글자
 //   <br>       → 줄바꿈
-export function formatText(raw) {
+export const hasUpgrade = raw => /\[[^\[\]|]*\|[^\[\]|]*\]/.test(String(raw || ''));
+
+export function formatText(raw, mode = 'both') {
   if (!raw) return '';
   let s = String(raw)
     .replace(/<br\s*\/?>/gi, '\n')
@@ -84,14 +86,29 @@ export function formatText(raw) {
     .replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1')
     .replace(/'''?/g, '');
   s = escapeHtml(s);
-  s = s.replace(/\[([^\[\]|]*)\|([^\[\]|]*)\]/g, (_, a, b) => `${a}<span class="up">(${b})</span>`);
+  s = s.replace(/\[([^\[\]|]*)\|([^\[\]|]*)\]/g, (_, a, b) => {
+    if (mode === 'base') return a ? `<span class="chg">${a}</span>` : '';
+    if (mode === 'up') return b ? `<span class="up">${b}</span>` : '';
+    return `${a}<span class="up">(${b})</span>`;
+  });
   s = s.replace(/\$([A-Z][A-Za-z']*(?:\s(?:of|the)\s[A-Z][A-Za-z']*)?)/g, '<b>$1</b>');
   s = s.replace(/@([A-Z]{2})/g, (_, code) => {
     if (code === 'ST') return '<i class="ic star">★</i>';
     if (code.endsWith('E')) return '<i class="ic energy">⚡</i>';
     return '';
   });
-  return s.replace(/\n{3,}/g, '\n\n').trim();
+  return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// 적 행동 설명: {{BD2|Strength}} → 키워드, {{Asc2|9|160}} → 승천 수치
+export function formatEnemyText(raw) {
+  if (!raw) return '';
+  let s = escapeHtml(String(raw).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''));
+  s = s.replace(/\{\{Asc2?\|(\d+)\|([^{}]*)\}\}/g, '<span class="asc" title="승천 $1 이상">$2</span>');
+  s = s.replace(/\{\{(?:BD2|KW2|BD|KW)\|([^{}|]*)\}\}/g, '<b>$1</b>');
+  s = s.replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1').replace(/\{\{([^{}|]*)\}\}/g, '$1');
+  s = s.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1').replace(/'''?/g, '');
+  return s.trim();
 }
 
 // ---------------------------------------------------------------- 이미지
@@ -223,16 +240,7 @@ async function cards() {
       if (c.Multiplayer && String(c.Multiplayer).toLowerCase() !== 'no') continue;
       const ch = charByEn.get(c.Color);
       const id = slug(name);
-      items.push({
-        id,
-        name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''),
-        group: ch ? ch.id : SHARED_GROUP.id,
-        rarity: c.Rarity.toLowerCase(),
-        type: String(c.Type || '').toLowerCase() || undefined,
-        cost: c.Cost ?? undefined,
-        text: formatText(c.Text),
-        img: image(c.Image, 'cards', id, { height: 300 }),
-      });
+      items.push(cardItem(name, c, id, ch ? ch.id : SHARED_GROUP.id));
     }
   }
   return {
@@ -241,6 +249,28 @@ async function cards() {
     split: { by: ['type'], groupFirst: true },
     groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), { ...SHARED_GROUP, name: '무색' }],
     items,
+  };
+}
+
+// 카드 한 장: 강화 전/후 효과·코스트·이미지를 따로 둔다.
+function cardItem(name, c, id, group) {
+  const upgradable = !c.NoUpgrade && c.Rarity !== 'Curse';
+  const changed = hasUpgrade(c.Text);
+  const costUp = c.CostPlus ?? undefined;
+  return {
+    id,
+    name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''),
+    group,
+    rarity: c.Rarity.toLowerCase(),
+    type: String(c.Type || '').toLowerCase() || undefined,
+    cost: c.Cost ?? undefined,
+    costUp: upgradable && costUp !== undefined && costUp !== c.Cost ? costUp : undefined,
+    stars: c.StarCost ?? undefined,
+    text: formatText(c.Text),
+    textBase: upgradable && changed ? formatText(c.Text, 'base') : undefined,
+    textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
+    img: image(c.Image, 'cards', id, { height: 300 }),
+    imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300 }) : undefined,
   };
 }
 
@@ -268,6 +298,7 @@ async function relics() {
       id, name,
       group: ch ? ch.id : SHARED_GROUP.id,
       rarity: r.Rarity.toLowerCase(),
+      flavor: r.Flavor && !/revealed in the future/i.test(r.Flavor) ? escapeHtml(formatPlain(r.Flavor)) : undefined,
       source: r.AncientSource ? String(r.AncientSource).replace(/\{\{[^|}]*\|([^}]*)\}\}/g, '$1').replace(/[\[\]]/g, '').trim() : undefined,
       text: formatText(r.Description),
       img: image(r.Image, 'relics', id, { height: 128, width: 128 }),
@@ -344,6 +375,15 @@ function enemyItems(data, type, folder, fallbackArea) {
         e.members.length > 1 && e.members.map(m => m.name).join(', '),
       ].filter(Boolean).join('\n')),
       img: image(e.first.Image, folder, id, { height: 220, width: 260, trim: true }),
+      area: area?.name,
+      members: e.members.map(m => ({
+        name: m.name,
+        hp: m.BaseHP ? String(m.BaseHP) : undefined,
+        hpAsc: m.AscHP && m.AscHP !== m.BaseHP ? String(m.AscHP) : undefined,
+        moves: (Array.isArray(m.Intents) ? m.Intents : Object.values(m.Intents || {}))
+          .filter(x => x && x.Name)
+          .map(x => ({ name: String(x.Name), text: formatEnemyText(x.Text) })),
+      })),
     };
   });
 }

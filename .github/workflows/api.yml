@@ -54,15 +54,22 @@ jobs:
         if: steps.secrets.outputs.ok == 'true'
         run: |
           find_id() {
-            npx wrangler d1 list --json | node -e '
-              const list = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            if ! out="$(npx wrangler d1 list --json 2>&1)"; then
+              echo "$out" >&2
+              echo >&2 "::error::Cloudflare D1 목록을 읽지 못했습니다. API 토큰에 'Account · D1 · Edit' 권한이 있는지, CLOUDFLARE_ACCOUNT_ID 가 토큰의 계정과 같은지 확인하세요."
+              return 1
+            fi
+            # wrangler 가 JSON 앞뒤로 안내 문구를 찍을 수 있어 배열 부분만 읽는다.
+            printf '%s' "$out" | node -e '
+              const text = require("fs").readFileSync(0, "utf8");
+              const list = JSON.parse(text.slice(text.indexOf("["), text.lastIndexOf("]") + 1));
               const db = list.find(d => d.name === "sts2-balance");
               process.stdout.write(db ? db.uuid : "");'
           }
-          id="$(find_id)"
+          id="$(find_id)" || exit 1
           if [ -z "$id" ]; then
             npx wrangler d1 create sts2-balance
-            id="$(find_id)"
+            id="$(find_id)" || exit 1
           fi
           test -n "$id"
           sed -i "s/__D1_DATABASE_ID__/$id/" wrangler.toml

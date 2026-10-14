@@ -78,10 +78,14 @@ export function itemDetails(item) {
   ];
 }
 
+export function tipDetails(item) {
+  return [...itemDetails(item), h('div', { class: 'tip-hint' }, '더블클릭하면 자세히 볼 수 있습니다')];
+}
+
 export function showTip(anchor, item) {
   const tip = tipEl();
   tipFor = anchor;
-  tip.replaceChildren(...itemDetails(item));
+  tip.replaceChildren(...tipDetails(item));
   tip.hidden = false;
   const r = anchor.getBoundingClientRect();
   const tr = tip.getBoundingClientRect();
@@ -113,7 +117,7 @@ export function toast(msg) {
 // rows: [{ label, color, items: [id], sub? }]
 // 줄 index -1 은 아래쪽 미배치 영역(pool).
 
-export function board({ template, rows, pool, onMove, onRowMenu, decorate, readonly = false, poolTitle = '배치하지 않은 항목' }) {
+export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorate, readonly = false, poolTitle = '배치하지 않은 항목' }) {
   const root = h('div', { class: `board${readonly ? ' readonly' : ''}` });
   let selected = null;
   const lookup = id => template.byId.get(id);
@@ -162,6 +166,24 @@ export function board({ template, rows, pool, onMove, onRowMenu, decorate, reado
   }
 
   attachTooltips(root, lookup);
+
+  // 더블클릭(읽기 전용 보드는 클릭)으로 상세 정보
+  if (onOpen) {
+    root.addEventListener('dblclick', e => {
+      const t = e.target.closest('.tile');
+      if (t) { hideTip(); onOpen(t.dataset.id); }
+    });
+    if (readonly) {
+      root.addEventListener('click', e => {
+        const t = e.target.closest('.tile');
+        if (t) { hideTip(); onOpen(t.dataset.id); }
+      });
+      root.addEventListener('keydown', e => {
+        const t = e.target.closest('.tile');
+        if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(t.dataset.id); }
+      });
+    }
+  }
   if (readonly) return root;
 
   const hint = h('div', { class: 'select-hint', hidden: true });
@@ -176,8 +198,11 @@ export function board({ template, rows, pool, onMove, onRowMenu, decorate, reado
     const item = lookup(id);
     hint.replaceChildren(
       h('div', { class: 'select-hint-body' }, ...itemDetails(item)),
-      h('div', { class: 'select-hint-help' }, '놓을 줄을 탭하세요 · 키보드 1~', rows.length, ' / 0 = 빼기'),
-      h('button', { class: 'btn ghost small', onclick: () => select(null) }, '취소'),
+      h('div', { class: 'select-hint-help' }, '놓을 줄을 탭하세요 · 키보드 1~', rows.length, ' / 0 = 빼기 / i = 자세히'),
+      h('div', { class: 'select-hint-actions' },
+        onOpen && h('button', { class: 'btn small', onclick: () => { const x = selected; select(null); onOpen(x); } }, '자세히'),
+        h('button', { class: 'btn ghost small', onclick: () => select(null) }, '취소'),
+      ),
     );
     hint.hidden = false;
   }
@@ -209,6 +234,7 @@ export function board({ template, rows, pool, onMove, onRowMenu, decorate, reado
     }
     if (!selected) return;
     if (e.key === 'Escape') { select(null); return; }
+    if ((e.key === 'i' || e.key === 'I') && onOpen) { const x = selected; select(null); onOpen(x); return; }
     const n = Number(e.key);
     if (Number.isInteger(n) && e.key.length === 1) {
       const to = n === 0 ? -1 : n - 1;

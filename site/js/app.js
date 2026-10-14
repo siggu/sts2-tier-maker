@@ -7,6 +7,7 @@ import {
   encodeShare, decodeShare, PALETTE,
 } from './tierlist.js';
 import { renderPng } from './export.js';
+import { openDetail, closeDetail } from './detail.js';
 import { verdictsFor, loadMine, saveMine, queueVote, onSyncStatus, fetchResults, flush } from './balance.js';
 
 const app = document.getElementById('app');
@@ -14,6 +15,7 @@ let db = null;
 let cleanup = [];
 
 function route() {
+  closeDetail();
   cleanup.forEach(fn => fn());
   cleanup = [];
   hideTip();
@@ -39,7 +41,8 @@ function setNav(active) {
 }
 
 function render(...nodes) {
-  app.replaceChildren(...nodes);
+  // 조건부 조각(cond && h(...))이 false·undefined·0 이 되면 글자로 찍히지 않게 거른다.
+  app.replaceChildren(...nodes.filter(n => n instanceof Node || (typeof n === 'string' && n)));
   app.focus({ preventScroll: true });
 }
 
@@ -163,6 +166,7 @@ async function viewTier(templateId, shareCode) {
       pool: { items: pool, controls },
       onMove: (id, to, index) => { moveItem(state, id, to, index); commit(); },
       onRowMenu: (ri, anchor) => rowMenu(ri, anchor),
+      onOpen: id => openDetail(template.byId.get(id), template.category, db),
     });
     const poolEl = b.querySelector('.pool');
     applyFilter(poolEl, template, filter);
@@ -226,7 +230,7 @@ async function viewTier(templateId, shareCode) {
 }
 
 function viewShared(template, shared) {
-  const b = board({ template, rows: shared.tiers, readonly: true });
+  const b = board({ template, rows: shared.tiers, readonly: true, onOpen: id => openDetail(template.byId.get(id), template.category, db) });
   render(
     h('div', { class: 'banner' },
       h('p', {}, '공유받은 티어 리스트를 보고 있습니다.'),
@@ -352,7 +356,10 @@ function viewBalance(templateId) {
     const placed = new Set(rows.flatMap(r => r.items));
     const pool = template.items.filter(i => !placed.has(i.id)).map(i => i.id);
     const controls = poolControls(template, filter, () => applyFilter(poolEl, template, filter));
-    const b = board({ template, rows, pool: { items: pool, controls }, onMove: move, poolTitle: '아직 투표하지 않은 항목' });
+    const b = board({
+      template, rows, pool: { items: pool, controls }, onMove: move, poolTitle: '아직 투표하지 않은 항목',
+      onOpen: id => openDetail(template.byId.get(id), template.category, db),
+    });
     const poolEl = b.querySelector('.pool');
     applyFilter(poolEl, template, filter);
     statusEl.textContent = syncText;
@@ -443,7 +450,11 @@ async function viewResults(templateId) {
   function listView(sorted) {
     const list = h('ol', { class: 'result-list' }, sorted.map(({ item, c }) => {
       const total = sum(c);
-      return h('li', { class: `result${total < 5 ? ' few' : ''}` },
+      return h('li', {
+        class: `result${total < 5 ? ' few' : ''}`, tabindex: '0', role: 'button', 'aria-label': `${item.name} 자세히`,
+        onclick: () => openDetail(item, template.category, db),
+        onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(item, template.category, db); } },
+      },
         tile(item, template),
         h('div', { class: 'result-main' },
           h('div', { class: 'result-name' }, item.name,
@@ -478,6 +489,7 @@ async function viewResults(templateId) {
     groups.forEach(g => g.sort((a, b) => share.get(b) - share.get(a)));
     return board({
       template, readonly: true,
+      onOpen: id => openDetail(template.byId.get(id), template.category, db),
       rows: VERDICTS.map((v, i) => ({ label: v.label, sub: v.sub, color: v.color, items: groups[i] })),
       decorate: (el, item) => el.append(h('span', { class: 'badge' }, `${share.get(item.id)}%`)),
     });
