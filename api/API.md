@@ -18,9 +18,10 @@
 | `src/http.js` | 공용: `json`, `corsHeaders`, `sha256`, `ipHashOf`, `rateLimited`, `readJson` |
 | `src/auth.js` | 구글 ID 토큰 검증, 세션. `getUser(request, env)` 를 내보낸다 |
 | `src/account.js` | `/auth/*`, `/me*`, `/gallery*`, `/comments*`, `/items/*/comments`, `/report` |
-| `src/play.js` | `/tiers/aggregate`, `/versus*` |
+| `src/play.js` | `/tiers/aggregate`, `/versus*` (월드컵) |
 | `migrations/0002_accounts.sql` | users, sessions, user_tiers, posts, reactions, comments, comment_likes, reports |
 | `migrations/0003_play.sql` | versus_votes, versus_ratings |
+| `migrations/0004_gallery_kind_worldcup.sql` | worldcup_stats (월드컵 부분) |
 
 `handleAccount` / `handlePlay` 는 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
 
@@ -116,22 +117,27 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 ## 모두의 티어표 (play.js)
 
 `GET /tiers/aggregate?template=` → `{ template, count, items: { 아이템id: { score, n } } }`
-- 공개 글(`posts`, hidden 제외)과 로그인 사용자가 동기화한 티어표(`user_tiers`)를 합친다. 같은 사람의 글·동기화본은 한 표로(동기화본 우선, 없으면 최신 글).
+- 티어표 공개 글(`posts`, `kind = 'tier'` 만, hidden 제외)과 로그인 사용자가 동기화한 티어표(`user_tiers`)를 합친다. 같은 사람의 글·동기화본은 한 표로(동기화본 우선, 없으면 최신 글).
 - 한 티어표에서 줄이 k개면 i번째 줄(0부터)의 점수 = 1 − i/(k−1) (k=1 이면 1). 배치하지 않은 항목은 세지 않는다.
 - `score` = 평균 점수(0–1), `n` = 그 항목을 배치한 티어표 수. 60초 캐시.
 
-## A vs B 대결 (play.js)
+## 월드컵 (play.js)
+
+사이트 `#/versus` 는 이상형 월드컵식 토너먼트다 (4·8·16·32·64강, 무작위 추첨). 경기 하나마다 `POST /versus` 로 Elo 를,
+한 판이 끝나면 `POST /versus/tournament` 로 우승·출전 횟수를 보낸다.
 
 | 요청 | 설명 |
 |---|---|
-| `POST /versus` `{ category, winner, loser, voter? }` | 같은 카테고리의 두 아이템 id. 로그인 상태면 계정, 아니면 익명 voter(형식은 `/balance` 와 같음). IP 당 1분 60회. 같은 사람이 같은 쌍에 다시 내면 마지막 선택만 반영. `{ ok, ratings: { [winner]: r, [loser]: r } }` |
-| `GET /versus/ranking?category=` | `{ category, items: { 아이템id: { rating, wins, losses } } }` (30초 캐시) |
+| `POST /versus` `{ category, winner, loser, voter? }` | 한 경기. 같은 카테고리의 두 아이템 id. 로그인 상태면 계정, 아니면 익명 voter(형식은 `/balance` 와 같음). IP 당 1분 60회. 같은 사람이 같은 쌍에 다시 내면 마지막 선택만 반영(되돌리기 후 다르게 고른 경우 포함). `{ ok, ratings: { [winner]: r, [loser]: r } }` |
+| `POST /versus/tournament` `{ category, champion, entrants: [아이템id...], voter? }` | 한 판의 결과. `entrants` 는 4·8·16·32·64개, 서로 다르고 모두 그 카테고리의 아이템, `champion` 은 그중 하나. 출전 항목마다 `entries + 1`, 우승 항목은 `champ + 1`. 로그인·voter 규칙은 `/versus` 와 같다(저장하지는 않음). IP 당 1분 6회(`cup` 버킷). `{ ok: true }`. 400 `reason`: `json`·`body`·`category`·`entrants`·`item`·`duplicate`·`champion`·`voter` |
+| `GET /versus/ranking?category=` | `{ category, items: { 아이템id: { rating, wins, losses, champ, entries } } }` (30초 캐시). 경기나 월드컵 기록이 하나라도 있는 항목만. 월드컵에만 나온 항목은 `rating: 1500, wins: 0, losses: 0`. 우승률 = `champ / entries` (화면에서 계산) |
 
 Elo: 시작 1500, K = 24. 같은 쌍 재투표로 결과가 바뀌면 앞선 결과를 되돌리지 않고 새 결과만 반영해도 된다(단순화) — 대신 wins/losses 는 versus_votes 에서 다시 센다.
 
 ```sql
 versus_votes(category, a, b, voter, winner, ts, PRIMARY KEY(category, a, b, voter))   -- a < b 로 정렬해 저장
 versus_ratings(category, item, rating REAL DEFAULT 1500, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, PRIMARY KEY(category, item))
+worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 0, PRIMARY KEY(category, item))   -- 0004
 ```
 
 ## 오류 코드·제한 (account.js 구현 기준)

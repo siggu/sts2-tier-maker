@@ -178,8 +178,27 @@ a.gal-card:hover { transform: translateY(-2px); border-color: var(--line-strong)
 @keyframes sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .sk-line { animation: none; } .gal-card { transition: none; } }
 
+/* 밸런스 투표 글: 너프/적당/버프 3줄 (짧은 판정 이름이 들어가게 이름 칸을 넓힌다) */
+.gal-prev-bal .gal-prev-label { flex-basis: 44px; font-family: var(--font-ui); font-size: 12px; letter-spacing: -.01em; }
+.gal-card-match {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 12.5px; font-weight: 700; color: #b7dd84;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gal-card-match i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.gal-card-match[hidden] { display: none; }
+
 /* ---------------------------------------------------------------- 갤러리 목록 */
 .gal-head { margin-bottom: 4px; }
+/* 티어표 | 밸런스 투표 탭 */
+.gal-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 1px solid rgba(255, 255, 255, .1); overflow-x: auto; scrollbar-width: none; }
+.gal-tabs a {
+  flex: none; padding: 9px 14px 8px; margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted); font-size: 14.5px; font-weight: 700; text-decoration: none; white-space: nowrap;
+}
+.gal-tabs a:hover { color: var(--text); }
+.gal-tabs a.on { color: var(--gold-hi); border-bottom-color: var(--gold); }
 .gal-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 16px; }
 .gal-select {
   min-height: 34px; max-width: 100%; padding: 0 26px 0 10px;
@@ -202,6 +221,7 @@ a.gal-card:hover { transform: translateY(-2px); border-color: var(--line-strong)
 /* ---------------------------------------------------------------- 홈: 갤러리 구역 */
 .gal-home-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
 .gal-home-head .block-title { margin: 0; }
+.gal-strip-note { grid-column: 1 / -1; margin: 0; padding: 28px 0; text-align: center; color: var(--muted); font-size: 14px; }
 .gal-home-all { margin-left: auto; color: var(--muted); font-size: 13.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .gal-home-all:hover { color: var(--gold-hi); }
 .gal-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -249,6 +269,30 @@ a.gal-card:hover { transform: translateY(-2px); border-color: var(--line-strong)
 .gal-react-btn.dislike.on { border-color: #f07a7d; background: rgba(229, 72, 77, .16); color: #ffc4c2; }
 .gal-react-btn.dislike.on .ic { color: #f07a7d; }
 .gal-post-bar .actions .ic { font-size: 15px; }
+.gal-kind-badge { padding: 2px 8px; border-radius: 999px; background: rgba(87, 167, 216, .16); color: #a9d4ef; font-size: 12px; font-weight: 700; }
+
+/* 밸런스 투표 글: 모두의 결과와 비교 */
+.bal-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  margin: 0 0 12px; padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, .1); border-radius: var(--radius);
+  background: rgba(0, 0, 0, .25); font-size: 13.5px; color: var(--muted);
+}
+.bal-summary[hidden] { display: none; }
+.bal-sum-pct { color: #c9eeb2; font-size: 14.5px; }
+.bal-sum-legend { display: inline-flex; align-items: center; gap: 6px; }
+.bal-sum-legend .bal-mark { position: static; }
+.bal-sum-link { margin-left: auto; color: var(--gold-hi); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.bal-sum-link:hover { text-decoration: underline; }
+.bal-mark {
+  display: inline-grid; place-items: center;
+  min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  font-size: 10.5px; font-weight: 800; line-height: 1; white-space: nowrap;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .7);
+}
+.bal-mark.agree { background: #8fcf6a; color: #10200a; }
+.bal-mark.differ { background: #f6a347; color: #261405; }
+.tile .bal-mark { position: absolute; right: -4px; top: -4px; z-index: 1; pointer-events: none; }
 
 /* ---------------------------------------------------------------- 티어 화면: 공개 창 미리보기 */
 .gal-publish-prev { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
@@ -342,6 +386,10 @@ a.gal-card:hover { transform: translateY(-2px); border-color: var(--line-strong)
   .gal-react-btn { flex: 1; justify-content: center; }
   .gal-post-bar .actions { width: 100%; }
   .gal-post-bar .actions .btn:not(.small) { flex: 1 1 auto; }
+  .gal-prev-bal .gal-prev-label { flex-basis: 34px; font-size: 10.5px; }
+  .gal-card-match { font-size: 11.5px; }
+  .bal-summary { font-size: 12.5px; padding: 8px 10px; }
+  .bal-sum-link { margin-left: 0; }
   .acct-modal { padding: 18px 16px 16px; }
   .acct-modal-title { font-size: 19px; }
 }

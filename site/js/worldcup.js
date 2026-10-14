@@ -157,8 +157,11 @@ export function mountWorldCup(opts) {
   const save = () => { run.at = Date.now(); writeRun(storeKey, run); };
 
   function start(size) {
-    pref = size;
-    writeRun(prefKey, size);
+    // 고를 수 있었던 크기만 다음 기본값으로 기억한다 (캐릭터처럼 4강뿐인 곳이 기본값을 4로 바꾸지 않게)
+    if (sizes.length > 1) {
+      pref = size;
+      writeRun(prefKey, size);
+    }
     run = { v: 1, size, entrants: drawEntrants(items.map(i => i.id), size), picks: [], finished: false, at: Date.now() };
     state = bracket(run.entrants, run.picks);
     last = null;

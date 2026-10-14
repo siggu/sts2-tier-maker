@@ -648,11 +648,16 @@ function viewGallery(templateId, params, ctx) {
 
 // ================================================================ 갤러리 글 하나
 
+// 로그인하면서 누른 좋아요·싫어요를 보내는 동안: 로그인 뒤 화면을 다시 그릴 때 보낸 뒤의 수를 받도록 기다린다.
+let reactGate = null;
+
 async function viewPost(postId, ctx) {
   const db = ctx.db;
   const token = ++viewToken;
   ctx.render(ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], ['…']), h('section', { class: 'empty' }, h('p', {}, t('acct.loading'))));
   let post;
+  if (reactGate) await reactGate;
+  if (token !== viewToken) return;
   try {
     post = (await api(`/gallery/${enc(postId)}`))?.post;
     if (!post) throw Object.assign(new Error('missing'), { status: 404 });
@@ -701,9 +706,11 @@ async function viewPost(postId, ctx) {
   async function react(v) {
     if (busy) return;
     const wasIn = Boolean(currentUser());
-    if (!(await requireLogin(t('acct.reason.react')))) return;
-    busy = true;
+    let release = null;
+    if (!wasIn) reactGate = new Promise(r => { release = r; });
     try {
+      if (!(await requireLogin(t('acct.reason.react')))) return;
+      busy = true;
       if (!wasIn) {
         // 방금 로그인했으면 내 반응을 먼저 알아 온다
         const fresh = (await api(`/gallery/${enc(post.id)}`))?.post;
@@ -726,6 +733,7 @@ async function viewPost(postId, ctx) {
       drawReactions();
     } finally {
       busy = false;
+      if (release) { reactGate = null; release(); }
     }
   }
 
