@@ -1,5 +1,9 @@
 import keys from '../../site/data/keys.json';
 import { makeValidator, VOTE_VALUES } from './votes.js';
+import { corsHeaders, json, sha256 } from './http.js';
+import { getUser } from './auth.js';
+import { handleAccount } from './account.js';
+import { handlePlay } from './play.js';
 
 const MAX_VOTERS_PER_IP_ITEM = 3; // 같은 IP 에서 한 아이템에 표를 무한히 늘리지 못하게
 const RATE_PER_MINUTE = 30;
@@ -17,6 +21,10 @@ export default {
       if (url.pathname === '/health') return json({ ok: true, items: validKeys.size }, 200, cors);
       if (url.pathname === '/balance' && request.method === 'POST') return await postVotes(request, env, ctx, cors);
       if (url.pathname === '/balance' && request.method === 'GET') return await getResults(url, env, ctx, cors);
+      // 로그인·동기화·갤러리·댓글 (account.js), 모두의 티어표·A vs B (play.js). 처리하지 않으면 null.
+      const res = (await handleAccount(request, env, ctx, { url, cors, keys: validKeys }))
+        ?? (await handlePlay(request, env, ctx, { url, cors, keys: validKeys }));
+      if (res) return res;
       return json({ error: 'not_found' }, 404, cors);
     } catch (err) {
       console.error(err);
@@ -25,36 +33,16 @@ export default {
   },
 };
 
-function corsHeaders(request, env) {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
-  };
-  if (allowed.includes(origin)) headers['Access-Control-Allow-Origin'] = origin;
-  return headers;
-}
-
-function json(body, status = 200, headers = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers },
-  });
-}
-
-async function sha256(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
-}
-
 async function postVotes(request, env, ctx, cors) {
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad_request', reason: 'json' }, 400, cors); }
-  const reason = validateBody(body);
+  // 로그인 상태면 계정 표('u_' + id)로 낸다. body.voter 는 없어도 되고 IP 당 voter 수 제한도 건너뛴다.
+  const user = await getUser(request, env);
+  const reason = validateBody(body, { voterOptional: Boolean(user) });
+  // 세션이 만료됐는데 voter 없이 보냈다면 다시 로그인하라고 알린다
+  if (reason === 'voter' && request.headers.has('Authorization')) return json({ error: 'auth' }, 401, cors);
   if (reason) return json({ error: 'bad_request', reason }, 400, cors);
+  const voter = user ? `u_${user.id}` : body.voter;
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const ipHash = await sha256(`${env.IP_SALT || 'sts2-balance'}:${ip}`);
@@ -71,8 +59,8 @@ async function postVotes(request, env, ctx, cors) {
   const latest = new Map();
   for (const vote of body.votes) latest.set(vote.item, vote.v);
 
-  // 이 IP 에서 다른 voter 로 이미 표를 낸 수
-  const items = [...latest.keys()];
+  // 이 IP 에서 다른 voter 로 이미 표를 낸 수 (계정 표는 계정당 하나라 세지 않는다)
+  const items = user ? [] : [...latest.keys()];
   const crowded = new Set();
   for (let i = 0; i < items.length; i += 90) {
     const chunk = items.slice(i, i + 90);
@@ -80,7 +68,7 @@ async function postVotes(request, env, ctx, cors) {
     const { results } = await env.DB.prepare(
       `SELECT item, COUNT(*) AS n FROM balance_votes
        WHERE ip_hash = ?1 AND voter != ?2 AND item IN (${placeholders}) GROUP BY item`
-    ).bind(ipHash, body.voter, ...chunk).all();
+    ).bind(ipHash, voter, ...chunk).all();
     for (const r of results) if (r.n >= MAX_VOTERS_PER_IP_ITEM) crowded.add(r.item);
   }
 
@@ -92,9 +80,9 @@ async function postVotes(request, env, ctx, cors) {
   const stmts = [];
   let skipped = 0;
   for (const [item, v] of latest) {
-    if (v === null) stmts.push(del.bind(item, body.voter));
+    if (v === null) stmts.push(del.bind(item, voter));
     else if (crowded.has(item)) skipped++;
-    else stmts.push(upsert.bind(item, body.voter, ipHash, VOTE_VALUES[v], now));
+    else stmts.push(upsert.bind(item, voter, ipHash, VOTE_VALUES[v], now));
   }
   if (stmts.length) await env.DB.batch(stmts);
 

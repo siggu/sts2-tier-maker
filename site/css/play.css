@@ -1,0 +1,206 @@
+/* 모두의 티어표·A vs B 대결 (play 에이전트) */
+
+/* ================================================================ 모두의 티어표 */
+.board .tile.agg-few { opacity: .42; filter: grayscale(.55); }
+.board .tile.agg-few:hover, .board .tile.agg-few:focus-visible { opacity: .85; filter: none; }
+.tile .agg-badge { min-width: 22px; text-align: center; }
+.tile .agg-badge.is-n { color: var(--text); }
+.agg-count { color: var(--gold-hi); font-weight: 700; }
+.agg-help { margin: 0 0 14px; font-size: 13.5px; }
+.agg-few-sample { opacity: .8; }
+.agg-empty-actions { justify-content: center; }
+.board.readonly .pool .pool-head { margin-bottom: 8px; }
+.board.readonly .pool .pool-head h3 { font-size: 16px; }
+
+/* ================================================================ 홈: 대결 안내 한 줄 */
+.vs-promo-wrap { margin-top: 18px; }
+.vs-promo {
+  display: flex; align-items: center; gap: 12px;
+  max-width: 820px; margin: 0 auto;
+  padding: 10px 12px 10px 16px;
+  border-radius: 14px; border: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(229, 72, 77, .14), rgba(22, 24, 31, .7) 40%, rgba(22, 24, 31, .7) 60%, rgba(87, 167, 216, .14));
+  color: var(--text); text-decoration: none;
+  transition: border-color .15s ease, transform .15s ease;
+}
+.vs-promo:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.vs-promo-icon { font-size: 22px; line-height: 1; }
+.vs-promo-text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.vs-promo-text strong { font-family: var(--font-title); font-size: 17px; color: var(--gold-hi); white-space: nowrap; }
+.vs-promo-text span { font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+.vs-promo-go { flex-shrink: 0; }
+
+/* ================================================================ A vs B 대결 */
+.vs-head {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+  gap: 8px 16px; margin-bottom: 12px;
+}
+.vs-counter {
+  padding: 3px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(217, 164, 65, .1);
+  color: var(--gold-hi); font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vs-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-bottom: 12px; }
+.vs-tabs { flex-shrink: 0; }
+.vs-tabs button { padding: 6px 16px; }
+.vs-groups {
+  flex: 1 1 260px; min-width: 0;
+  display: flex; gap: 6px;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin;
+  padding: 2px 2px 4px;
+}
+.vs-chip {
+  --chip: var(--gold);
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.vs-chip[style]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--chip); }
+.vs-chip:hover { color: var(--text); border-color: rgba(255, 255, 255, .3); }
+.vs-chip.on { color: var(--text); border-color: var(--chip); background: color-mix(in srgb, var(--chip) 24%, transparent); }
+.vs-note { margin: 0 0 10px; font-size: 13px; }
+
+/* 대결 판 */
+.vs-arena { text-align: center; }
+.vs-question { margin: 6px 0 14px; font-family: var(--font-title); font-size: clamp(19px, 2.6vw, 24px); color: var(--gold-hi); }
+.vs-pair {
+  position: relative;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 16px; align-items: stretch;
+  max-width: 780px; margin: 0 auto;
+  animation: vs-in .16s ease;
+}
+@keyframes vs-in { from { opacity: .35; transform: translateY(4px); } }
+.vs-side { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.vs-left { --side: #e5484d; }
+.vs-right { --side: #57a7d8; }
+.vs-pick {
+  position: relative;
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 18px 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  background:
+    radial-gradient(90% 60% at 50% 100%, color-mix(in srgb, var(--side) 16%, transparent), transparent 70%),
+    var(--panel);
+  color: var(--text); text-align: center; cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .vs-pick:hover { border-color: var(--side); transform: translateY(-2px); box-shadow: 0 0 0 1px var(--side), 0 14px 32px rgba(0, 0, 0, .45); }
+}
+.vs-pick:focus-visible { border-color: var(--side); }
+.vs-pick:active { transform: scale(.98); }
+.vs-media { width: 100%; display: grid; place-items: center; height: 280px; }
+.vs-media img { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .6)); pointer-events: none; }
+.vs-pair.kind-card .vs-media { height: clamp(220px, 40vh, 330px); }
+.vs-pair.kind-icon .vs-media { height: 128px; }
+.vs-pair.kind-icon .vs-media img { width: 112px; height: 112px; }
+.vs-pair.kind-creature .vs-media, .vs-pair.kind-portrait .vs-media { height: clamp(180px, 32vh, 260px); }
+.vs-noimg {
+  width: min(180px, 100%); height: 100%; display: grid; place-items: center;
+  border-radius: 10px; background: linear-gradient(180deg, #2b2f38, #1c1f26); border: 1px solid rgba(255, 255, 255, .12);
+  font-family: var(--font-game); font-size: 34px; color: var(--muted);
+}
+.vs-pair.kind-icon .vs-noimg { width: 112px; height: 112px; }
+.vs-name { font-family: var(--font-game); font-weight: 700; font-size: 20px; line-height: 1.2; color: var(--gold-hi); overflow-wrap: anywhere; }
+.vs-meta { font-size: 12.5px; color: var(--muted); }
+.vs-pick .tip-text { width: 100%; margin-top: 2px; text-align: left; font-size: 13.5px; }
+.vs-key {
+  position: absolute; top: 8px; left: 10px;
+  min-width: 26px; padding: 1px 6px; border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, .18); background: rgba(0, 0, 0, .35);
+  color: var(--muted); font-size: 13px; font-weight: 700;
+}
+.vs-right .vs-key { left: auto; right: 10px; }
+.vs-mid {
+  align-self: center;
+  display: grid; place-items: center;
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: radial-gradient(circle at 50% 35%, #3a2a14, #140f08);
+  font-family: var(--font-game); font-weight: 700; font-size: 19px; color: var(--gold);
+  box-shadow: 0 0 22px rgba(217, 164, 65, .25);
+}
+.vs-info { align-self: center; }
+.vs-actions { display: flex; justify-content: center; margin-top: 16px; }
+.vs-skip { min-width: 140px; }
+.vs-kbd { padding: 0 5px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .18); font-size: 12px; }
+.vs-last { min-height: 1.6em; margin: 10px 0 0; font-size: 13.5px; color: var(--muted); }
+.vs-last strong { color: var(--gold-hi); }
+.vs-last-label { opacity: .85; }
+.vs-keys { margin: 2px 0 0; font-size: 12px; color: var(--muted); opacity: .8; }
+.vs-done h2 { margin-top: 0; }
+
+/* 순위 */
+.vs-rank-status { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+.vs-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vs-rank-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 14px 8px 8px;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.vs-rank-row:hover { border-color: var(--line-strong); }
+.vs-rank-row.few { opacity: .6; }
+.vs-rank-row .tile { cursor: inherit; --tile-w: 44px; --tile-h: 58px; --icon: 44px; --creature-w: 56px; --creature-h: 48px; }
+.vs-rank-no {
+  flex: 0 0 2.4em; text-align: center;
+  font-family: var(--font-game); font-weight: 700; font-size: 17px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.vs-rank-no.top1 { color: #f0c76a; }
+.vs-rank-no.top2 { color: #d4dae2; }
+.vs-rank-no.top3 { color: #d8955a; }
+.vs-rank-main { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.vs-rank-name { font-family: var(--font-game); font-weight: 700; font-size: 15.5px; line-height: 1.25; color: var(--gold-hi); overflow-wrap: anywhere; }
+.vs-rank-bar { display: block; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.vs-rank-bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c48a28, #f0c76a); }
+.vs-rank-sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vs-rank-rating { font-family: var(--font-game); font-weight: 700; font-size: 18px; color: var(--gold-hi); font-variant-numeric: tabular-nums; }
+.vs-more { margin: 14px 0 0; text-align: center; }
+.vs-rank-help { margin: 12px 0 0; font-size: 13px; }
+@media (min-width: 900px) {
+  .vs-rank { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- 모바일 ---- */
+@media (max-width: 640px) {
+  .vs-promo { gap: 10px; padding: 10px 10px 10px 12px; }
+  .vs-promo-text strong { font-size: 15.5px; }
+  .vs-promo-text span { font-size: 12.5px; }
+  .vs-controls { gap: 8px; }
+  .vs-groups { flex-basis: 100%; }
+  .vs-question { margin: 2px 0 10px; }
+  .vs-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .vs-mid {
+    position: absolute; left: 50%; top: 38%; z-index: 2;
+    transform: translate(-50%, -50%);
+    width: 40px; height: 40px; font-size: 15px;
+    pointer-events: none;
+  }
+  .vs-pick { padding: 12px 8px 12px; border-radius: 12px; gap: 4px; }
+  .vs-pair.kind-card .vs-media { height: 205px; }
+  .vs-pair.kind-icon .vs-media { height: 92px; }
+  .vs-pair.kind-icon .vs-media img { width: 84px; height: 84px; }
+  .vs-pair.kind-creature .vs-media, .vs-pair.kind-portrait .vs-media { height: 170px; }
+  .vs-name { font-size: 16px; }
+  .vs-key { display: none; }
+  .vs-pair.kind-icon .vs-noimg { width: 84px; height: 84px; }
+  .vs-pick .tip-text { font-size: 12.5px; line-height: 1.45; }
+  .vs-skip { width: 100%; }
+  .vs-rank-row { gap: 8px; padding: 6px 10px 6px 4px; }
+  .vs-rank-no { flex-basis: 2em; font-size: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vs-pair { animation: none; }
+  .vs-pick, .vs-promo { transition: none; }
+}

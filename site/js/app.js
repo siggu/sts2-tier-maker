@@ -1,4 +1,5 @@
-import { loadData, facetLabel } from './data.js';
+import { loadData, facetLabel, groupLabel } from './data.js';
+import { t, lang, LANGS, setLang, translateStatic, collator } from './i18n.js';
 import { h, toast, tile, hideTip, attachTooltips } from './ui.js';
 import { board } from './ui.js';
 import { poolControls, applyFilter } from './filters.js';
@@ -9,12 +10,24 @@ import {
 import { renderPng } from './export.js';
 import { openDetail, closeDetail } from './detail.js';
 import { verdictsFor, loadMine, saveMine, loadSubmitted, unsubmittedChanges, submitChanges, onSyncStatus, fetchResults, flush } from './balance.js';
+import * as community from './community.js';
+import { currentUser } from './auth.js';
+import * as play from './play.js';
 
 const app = document.getElementById('app');
 let db = null;
 let cleanup = [];
 
 let lastPath = null;
+
+// 기능 모듈(community.js, play.js)에 넘기는 화면 도구
+const ctx = {
+  get db() { return db; },
+  render, crumbs, notFound, popover, progressBar, templateCard, thumbs,
+  modes: () => MODES,
+  addCleanup: fn => cleanup.push(fn),
+  rerender: () => route(),
+};
 
 function route() {
   closeDetail();
@@ -28,7 +41,10 @@ function route() {
   // 다른 화면으로 옮길 때는 맨 위에서 시작한다.
   if (path !== lastPath) { window.scrollTo(0, 0); lastPath = path; }
 
-  setNav(parts[0] === 'balance' ? 'balance' : 'tier');
+  setNav(parts[0] === 'balance' ? 'balance' : 'tier', parts);
+
+  // 기능 모듈이 먼저 자기 주소(#/gallery, #/versus 등)를 처리한다.
+  if (community.route(parts, params, ctx) || play.route(parts, params, ctx)) return;
 
   if (parts[0] === 'tier' && parts[1]) return viewTier(parts[1], params.get('s'));
   if (parts[0] === 'c' && parts[1]) return viewCategory('tier', parts[1]);
@@ -39,11 +55,15 @@ function route() {
   return viewHome(parts[0] === 'balance' ? 'balance' : 'tier');
 }
 
-function setNav(active) {
+function setNav(active, parts = []) {
   const nav = document.getElementById('topnav');
+  // 기능 모듈이 주소를 맡으면 그 모듈의 메뉴가 활성
+  const extra = [...community.navLinks(parts), ...play.navLinks(parts)];
+  const moduleActive = extra.some(a => a.classList.contains('active'));
   nav.replaceChildren(
-    h('a', { href: '#/', class: active === 'tier' ? 'active' : null }, '티어 메이커'),
-    h('a', { href: '#/balance', class: active === 'balance' ? 'active' : null }, '밸런스 투표'),
+    h('a', { href: '#/', class: active === 'tier' && !moduleActive ? 'active' : null }, t('mode.tier')),
+    h('a', { href: '#/balance', class: active === 'balance' && !moduleActive ? 'active' : null }, t('mode.balance')),
+    ...extra,
   );
 }
 
@@ -55,41 +75,30 @@ function render(...nodes) {
 
 function notFound() {
   render(h('section', { class: 'empty' },
-    h('h2', {}, '찾을 수 없는 템플릿입니다'),
-    h('p', {}, h('a', { href: '#/' }, '처음으로 돌아가기')),
+    h('h2', {}, t('notFound.title')),
+    h('p', {}, h('a', { href: '#/' }, t('notFound.home'))),
   ));
 }
 
 // ---------------------------------------------------------------- 홈
 
-const CATEGORY_BLURB = {
-  characters: '다섯 캐릭터 중 누가 가장 강할까요?',
-  cards: '캐릭터별 공격 · 스킬 · 파워 카드',
-  curses: '덱에 들어오면 가장 괴로운 저주는?',
-  relics: '희귀도별 · 고대의 존재별 · 캐릭터 전용 유물',
-  potions: '희귀도별 · 캐릭터 전용 포션',
-  enchantments: '카드에 붙는 인챈트 효과',
-  ancients: '막 시작마다 만나 축복을 주는 존재',
-  monsters: '막별 일반 전투 상대',
-  elites: '막별 엘리트 전투 상대',
-  bosses: '막별 보스',
-};
+const blurb = cat => t(`blurb.${cat.id}`);
 
 const MODES = {
   tier: {
     base: '#/',
-    title: '티어 메이커',
+    title: t('mode.tier'),
     icon: '🏆',
-    lead: '끌어다 놓아 나만의 티어 리스트를 만들고, 이미지로 저장하거나 링크로 공유하세요.',
-    href: t => `#/tier/${t.id}`,
+    lead: t('mode.tier.lead'),
+    href: tpl => `#/tier/${tpl.id}`,
     cat: c => `#/c/${c.id}`,
   },
   balance: {
     base: '#/balance',
-    title: '밸런스 투표',
+    title: t('mode.balance'),
     icon: '⚖️',
-    lead: '사기인지, 적당한지, 약한지 골라 주세요. 모두의 표가 모여 비율로 보입니다.',
-    href: t => `#/balance/${t.id}`,
+    lead: t('mode.balance.lead'),
+    href: tpl => `#/balance/${tpl.id}`,
     cat: c => `#/balance/c/${c.id}`,
   },
 };
@@ -105,13 +114,13 @@ function thumbs(items, tileKind, n = 4) {
 
 function progressBar(done, total) {
   const pct = total ? Math.round((done / total) * 100) : 0;
-  return h('div', { class: 'pbar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': `${done}/${total} 완료` },
+  return h('div', { class: 'pbar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': t('progress.aria', { done, total }) },
     h('span', { style: { width: `${pct}%` } }));
 }
 
 function crumbs(mode, ...items) {
   const m = MODES[mode];
-  return h('nav', { class: 'crumbs', 'aria-label': '경로' },
+  return h('nav', { class: 'crumbs', 'aria-label': t('crumbs.aria') },
     h('a', { href: m.base }, m.title),
     items.map(([label, href]) => [h('span', { class: 'sep', 'aria-hidden': 'true' }, '›'), href ? h('a', { href }, label) : h('span', { 'aria-current': 'page' }, label)]),
   );
@@ -159,13 +168,13 @@ function viewHome(mode) {
       thumbs(cat.items, cat.tile, 4),
       h('div', { class: 'cat-card-body' },
         h('h3', {}, cat.name),
-        h('p', {}, CATEGORY_BLURB[cat.id] || ''),
+        h('p', {}, blurb(cat)),
         h('div', { class: 'cat-card-meta' },
           // 완료한 묶음 / 전체 묶음: 다 끝냄 초록, 일부 주황, 시작 안 함 빨강
-          h('span', { class: `st ${stateClass(counts.done, templates.length, touched)}`, title: '완료한 묶음 / 전체 묶음' },
+          h('span', { class: `st ${stateClass(counts.done, templates.length, touched)}`, title: t('home.doneSets') },
             `${counts.done === templates.length ? '✓ ' : ''}${counts.done}/${templates.length}`),
-          h('span', {}, `${cat.items.length}개`),
-          counts.submit > 0 && h('span', { class: 'badge-submit' }, `제출 필요 ${counts.submit}`),
+          h('span', {}, t('n.items', { n: cat.items.length })),
+          counts.submit > 0 && h('span', { class: 'badge-submit' }, `${t('status.submit')} ${counts.submit}`),
         ),
       ),
     );
@@ -174,41 +183,43 @@ function viewHome(mode) {
   const myCount = mode === 'balance' ? myVoteCount() : 0;
   render(
     h('section', { class: 'hero' },
-      h('p', { class: 'eyebrow' }, 'Slay the Spire 2 · 비공식 팬 사이트'),
-      h('h1', {}, '첨탑의 티어 메이커'),
+      h('p', { class: 'eyebrow' }, t('home.eyebrow')),
+      h('h1', {}, t('site.name')),
       modeSwitch(mode),
       myCount > 0 && h('a', { class: 'my-votes-link', href: '#/balance/mine' },
         h('span', { class: 'mvl-icon', 'aria-hidden': 'true' }, '🗳️'),
-        h('span', {}, h('strong', {}, '내 투표 보기'), ` · 제출한 표 ${myCount}개`),
+        h('span', {}, h('strong', {}, t('home.myVotes')), ` · ${t('home.myVotesCount', { n: myCount })}`),
         h('span', { 'aria-hidden': 'true' }, '›')),
     ),
+    community.homeBlocks(mode, ctx),
+    play.homeBlocks(mode, ctx),
     started.length > 0 && h('section', { class: 'block' },
-      h('h2', { class: 'block-title' }, '이어서 하기'),
-      h('div', { class: 'tpl-grid' }, started.map(({ t, s }) => templateCard(mode, t, s, true))),
+      h('h2', { class: 'block-title' }, t('home.continue')),
+      h('div', { class: 'tpl-grid' }, started.map(({ t: tpl, s }) => templateCard(mode, tpl, s, true))),
     ),
     h('section', { class: 'block' },
-      h('h2', { class: 'block-title' }, mode === 'tier' ? '무엇의 티어를 매길까요?' : '무엇에 투표할까요?'),
+      h('h2', { class: 'block-title' }, mode === 'tier' ? t('home.pick.tier') : t('home.pick.balance')),
       h('div', { class: 'cat-grid' }, catCards),
     ),
   );
 }
 
-function templateCard(mode, t, summary = summaryFor(mode, t), showCategory = false) {
+function templateCard(mode, tpl, summary = summaryFor(mode, tpl), showCategory = false) {
   const m = MODES[mode];
-  const status = templateStatus(t, summary);
+  const status = templateStatus(tpl, summary);
   const placed = summary?.placed || 0;
   const meta = [
     // 배치(분류)한 항목 / 전체 항목: 다 끝냄 초록, 일부 주황, 시작 안 함 빨강
-    h('span', { class: `st ${status === 'done' ? 'st-done' : stateClass(placed, t.items.length, status ? 1 : 0)}` },
-      `${status === 'done' ? '✓ ' : ''}${placed}/${t.items.length}`),
-    status === 'submit' && h('span', { class: 'badge-submit' }, '제출 필요'),
+    h('span', { class: `st ${status === 'done' ? 'st-done' : stateClass(placed, tpl.items.length, status ? 1 : 0)}` },
+      `${status === 'done' ? '✓ ' : ''}${placed}/${tpl.items.length}`),
+    status === 'submit' && h('span', { class: 'badge-submit' }, t('status.submit')),
   ];
-  return h('a', { class: `tpl-card${status ? ` is-${status}` : ''}`, href: m.href(t), style: t.group?.color ? { '--accent': t.group.color } : null },
-    thumbs(t.items, t.tile, 4),
+  return h('a', { class: `tpl-card${status ? ` is-${status}` : ''}`, href: m.href(tpl), style: tpl.group?.color ? { '--accent': tpl.group.color } : null },
+    thumbs(tpl.items, tpl.tile, 4),
     h('div', { class: 'tpl-card-body' },
-      h('strong', {}, showCategory ? t.title : (t.parts.length ? t.label : '전체')),
+      h('strong', {}, showCategory ? tpl.title : (tpl.parts.length ? tpl.label : t('tpl.all'))),
       h('div', { class: 'tpl-card-meta' }, meta),
-      (status === 'progress' || status === 'submit') && progressBar(summary.placed, t.items.length),
+      (status === 'progress' || status === 'submit') && progressBar(summary.placed, tpl.items.length),
     ),
   );
 }
@@ -230,10 +241,10 @@ function viewCategory(mode, catId) {
   }
   const label = sec => {
     if (customLabel.has(sec)) return customLabel.get(sec);
-    if (sec === 'all') return '한 번에 전부';
-    if (sec === 'rarity') return '희귀도별';
-    if (sec === 'type') return '종류별';
-    if (sec === 'group') return cat.groupLabel === '막' ? '막별' : `${cat.groupLabel || '캐릭터'} 전용`;
+    if (sec === 'all') return t('section.all');
+    if (sec === 'rarity') return t('section.rarity');
+    if (sec === 'type') return t('section.type');
+    if (sec === 'group') return cat.groupKind === 'act' ? t('section.act') : t('section.character');
     return cat.groups.find(g => g.id === sec)?.name || sec;
   };
   const color = sec => cat.groups.find(g => g.id === sec)?.color;
@@ -242,7 +253,7 @@ function viewCategory(mode, catId) {
     crumbs(mode, [cat.name]),
     h('header', { class: 'page-head' },
       h('h1', {}, cat.name),
-      h('p', {}, CATEGORY_BLURB[cat.id] || '', ` · 모두 ${cat.items.length}개를 묶음 ${templates.length}개로 나눴습니다. 하나를 골라 시작하세요.`),
+      h('p', {}, blurb(cat), ` · ${t('category.split', { n: cat.items.length, sets: templates.length })}`),
     ),
     order.map(sec => h('section', { class: 'block' },
       h('h2', { class: 'block-title', style: color(sec) ? { '--accent': color(sec) } : null }, label(sec)),
@@ -256,7 +267,7 @@ function boardHeader(mode, template) {
   const cat = template.category;
   const multi = db.templates.filter(t => t.category.id === cat.id).length > 1;
   const path = multi
-    ? [[cat.name, MODES[mode].cat(cat)], [template.parts.map(p => p.label).join(' · ') || '전체']]
+    ? [[cat.name, MODES[mode].cat(cat)], [template.parts.map(p => p.label).join(' · ') || t('tpl.all')]]
     : [[cat.name]];
   return crumbs(mode, ...path);
 }
@@ -268,11 +279,10 @@ function usageHint(mode) {
   try { if (localStorage.getItem(HINT_KEY)) return null; } catch { /* 저장소 없음 */ }
   const el = h('div', { class: 'hint' },
     h('div', {},
-      h('strong', {}, '사용법 '),
-      '항목을 원하는 줄로 끌어다 놓으세요. 모바일에서는 항목을 탭한 뒤 놓을 줄을 탭하면 됩니다. ',
-      '항목을 더블클릭(모바일은 탭 후 "자세히")하면 효과와 강화 정보를 볼 수 있습니다.',
-      mode === 'balance' ? ' 옮긴 내용은 이 기기에 임시 저장되고, "투표 완료"를 눌러야 모두의 결과에 반영됩니다.' : ''),
-    h('button', { class: 'btn ghost small', onclick: () => { try { localStorage.setItem(HINT_KEY, '1'); } catch { /* 무시 */ } el.remove(); } }, '알겠어요'),
+      h('strong', {}, `${t('hint.title')} `),
+      t('hint.body'),
+      mode === 'balance' ? ` ${t('hint.balance')}` : ''),
+    h('button', { class: 'btn ghost small', onclick: () => { try { localStorage.setItem(HINT_KEY, '1'); } catch { /* 무시 */ } el.remove(); } }, t('hint.ok')),
   );
   return el;
 }
@@ -313,7 +323,7 @@ async function viewTier(templateId, shareCode) {
 
   if (shareCode) {
     const shared = await decodeShare(shareCode, template);
-    if (!shared) { toast('공유 링크를 읽지 못했습니다'); location.hash = `#/tier/${templateId}`; return; }
+    if (!shared) { toast(t('share.bad')); location.hash = `#/tier/${templateId}`; return; }
     return viewShared(template, shared);
   }
 
@@ -346,7 +356,7 @@ async function viewTier(templateId, shareCode) {
     applyFilter(poolEl, template, filter);
 
     const title = h('input', {
-      class: 'title-input', value: state.title, maxlength: '80', 'aria-label': '티어 리스트 제목',
+      class: 'title-input', value: state.title, maxlength: '80', 'aria-label': t('tier.titleAria'),
       onchange: e => { state.title = e.target.value.trim() || freshState(template).title; saveState(template, state); },
     });
 
@@ -358,22 +368,24 @@ async function viewTier(templateId, shareCode) {
           title,
           h('div', { class: 'board-progress' },
             progressBar(placed, template.items.length),
-            h('span', {}, `${placed} / ${template.items.length} 배치`)),
+            h('span', {}, t('tier.placed', { n: placed, total: template.items.length }))),
         ),
         h('div', { class: 'actions' },
-          h('button', { class: 'btn', onclick: () => savePng(template, state) }, '이미지 저장'),
-          h('button', { class: 'btn', onclick: () => share(template, state) }, '링크 공유'),
-          h('button', { class: 'btn ghost', onclick: reset }, '초기화'),
+          h('button', { class: 'btn', onclick: () => savePng(template, state) }, t('tier.savePng')),
+          h('button', { class: 'btn', onclick: () => share(template, state) }, t('tier.share')),
+          community.tierActions(template, state, ctx),
+          play.tierActions(template, state, ctx),
+          h('button', { class: 'btn ghost', onclick: reset }, t('tier.reset')),
         ),
       ),
       usageHint('tier'),
-      template.category.enemy && h('p', { class: 'help' }, '위협도 기준입니다. S가 가장 위협적인(어려운) 상대입니다.'),
+      template.category.enemy && h('p', { class: 'help' }, t('tier.threatNote')),
       b,
     );
   }
 
   function reset() {
-    if (!confirm('이 템플릿의 배치와 티어 설정을 모두 지울까요?')) return;
+    if (!confirm(t('tier.resetConfirm'))) return;
     clearState(template);
     state = freshState(template);
     draw();
@@ -381,20 +393,20 @@ async function viewTier(templateId, shareCode) {
 
   function rowMenu(ri, anchor) {
     const tier = state.tiers[ri];
-    const input = h('input', { value: tier.label, maxlength: '40', 'aria-label': '줄 이름' });
+    const input = h('input', { value: tier.label, maxlength: '40', 'aria-label': t('row.nameAria') });
     const close = popover(anchor, h('div', { class: 'row-menu' },
-      h('label', { class: 'field' }, h('span', {}, '이름'), input),
-      h('div', { class: 'swatches', role: 'group', 'aria-label': '색상' }, PALETTE.map(c => h('button', {
+      h('label', { class: 'field' }, h('span', {}, t('row.name')), input),
+      h('div', { class: 'swatches', role: 'group', 'aria-label': t('row.color') }, PALETTE.map(c => h('button', {
         class: `swatch${c === tier.color ? ' on' : ''}`, style: { background: c }, 'aria-label': c,
         onclick: () => { tier.color = c; close(); commit(); },
       }))),
       h('div', { class: 'menu-actions' },
-        h('button', { class: 'btn small', onclick: () => { state.tiers.splice(ri, 0, { label: '새 줄', color: PALETTE[9], items: [] }); close(); commit(); } }, '위에 줄 추가'),
-        h('button', { class: 'btn small', onclick: () => { state.tiers.splice(ri + 1, 0, { label: '새 줄', color: PALETTE[9], items: [] }); close(); commit(); } }, '아래에 줄 추가'),
-        ri > 0 && h('button', { class: 'btn small', onclick: () => { [state.tiers[ri - 1], state.tiers[ri]] = [state.tiers[ri], state.tiers[ri - 1]]; close(); commit(); } }, '위로'),
-        ri < state.tiers.length - 1 && h('button', { class: 'btn small', onclick: () => { [state.tiers[ri + 1], state.tiers[ri]] = [state.tiers[ri], state.tiers[ri + 1]]; close(); commit(); } }, '아래로'),
-        h('button', { class: 'btn small', onclick: () => { tier.items = []; close(); commit(); } }, '비우기'),
-        state.tiers.length > 1 && h('button', { class: 'btn small danger', onclick: () => { state.tiers.splice(ri, 1); close(); commit(); } }, '줄 삭제'),
+        h('button', { class: 'btn small', onclick: () => { state.tiers.splice(ri, 0, { label: t('row.new'), color: PALETTE[9], items: [] }); close(); commit(); } }, t('row.addAbove')),
+        h('button', { class: 'btn small', onclick: () => { state.tiers.splice(ri + 1, 0, { label: t('row.new'), color: PALETTE[9], items: [] }); close(); commit(); } }, t('row.addBelow')),
+        ri > 0 && h('button', { class: 'btn small', onclick: () => { [state.tiers[ri - 1], state.tiers[ri]] = [state.tiers[ri], state.tiers[ri - 1]]; close(); commit(); } }, t('row.up')),
+        ri < state.tiers.length - 1 && h('button', { class: 'btn small', onclick: () => { [state.tiers[ri + 1], state.tiers[ri]] = [state.tiers[ri], state.tiers[ri + 1]]; close(); commit(); } }, t('row.down')),
+        h('button', { class: 'btn small', onclick: () => { tier.items = []; close(); commit(); } }, t('row.clear')),
+        state.tiers.length > 1 && h('button', { class: 'btn small danger', onclick: () => { state.tiers.splice(ri, 1); close(); commit(); } }, t('row.delete')),
       ),
     ), () => {
       const v = input.value.trim();
@@ -413,15 +425,15 @@ function viewShared(template, shared) {
   render(
     boardHeader('tier', template),
     h('div', { class: 'banner' },
-      h('p', {}, '공유받은 티어 리스트를 보고 있습니다. 항목을 누르면 자세히 볼 수 있습니다.'),
+      h('p', {}, t('shared.banner')),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn', onclick: () => savePng(template, shared) }, '이미지 저장'),
+        h('button', { class: 'btn', onclick: () => savePng(template, shared) }, t('tier.savePng')),
         h('button', { class: 'btn primary', onclick: () => {
-          if (savedSummary(template) && !confirm('내 티어 리스트를 이 내용으로 덮어쓸까요?')) return;
+          if (savedSummary(template) && !confirm(t('shared.overwrite'))) return;
           saveState(template, shared);
           location.hash = `#/tier/${template.id}`;
-        } }, '내 티어 리스트로 가져오기'),
-        h('a', { class: 'btn ghost', href: `#/tier/${template.id}` }, '내 것 보기'),
+        } }, t('shared.import')),
+        h('a', { class: 'btn ghost', href: `#/tier/${template.id}` }, t('shared.mine')),
       ),
     ),
     h('h1', { class: 'shared-title' }, shared.title),
@@ -430,7 +442,7 @@ function viewShared(template, shared) {
 }
 
 async function savePng(template, state) {
-  toast('이미지를 만드는 중…');
+  toast(t('png.making'));
   try {
     const blob = await renderPng(template, state);
     const url = URL.createObjectURL(blob);
@@ -439,10 +451,10 @@ async function savePng(template, state) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    toast('이미지를 저장했습니다');
+    toast(t('png.saved'));
   } catch (err) {
     console.error(err);
-    toast('이미지를 만들지 못했습니다');
+    toast(t('png.failed'));
   }
 }
 
@@ -455,9 +467,9 @@ async function share(template, state) {
       return;
     }
     await navigator.clipboard.writeText(url);
-    toast('공유 링크를 복사했습니다');
+    toast(t('share.copied'));
   } catch {
-    prompt('아래 링크를 복사하세요', url);
+    prompt(t('share.copyPrompt'), url);
   }
 }
 
@@ -488,10 +500,10 @@ function popover(anchor, content, onClose) {
 // ---------------------------------------------------------------- 밸런스 투표
 
 const SYNC_TEXT = {
-  pending: '제출 대기 중',
-  saving: '제출 중…',
+  pending: t('sync.pending'),
+  saving: t('sync.saving'),
   saved: '',
-  offline: '서버에 연결하지 못했습니다. 이 기기에 보관해 두고 자동으로 다시 보냅니다.',
+  offline: t('sync.offline'),
 };
 
 function viewBalance(templateId) {
@@ -537,7 +549,7 @@ function viewBalance(templateId) {
     const pool = template.items.filter(i => !placed.has(i.id)).map(i => i.id);
     const controls = poolControls(template, filter, () => applyFilter(poolEl, template, filter));
     const b = board({
-      template, rows, pool: { items: pool, controls }, onMove: move, poolTitle: '아직 분류하지 않은 항목',
+      template, rows, pool: { items: pool, controls }, onMove: move, poolTitle: t('balance.pool'),
       onOpen: id => openDetail(template.byId.get(id), template.category, db),
     });
     const poolEl = b.querySelector('.pool');
@@ -548,15 +560,15 @@ function viewBalance(templateId) {
     const submitting = statusEl.dataset.state === 'saving';
     let submitBtn;
     if (changes.length) {
-      submitBtn = h('button', { class: 'btn primary submit', disabled: submitting, onclick: submit }, `투표 완료 · 변경 ${changes.length}개 제출`);
+      submitBtn = h('button', { class: 'btn primary submit', disabled: submitting, onclick: submit }, t('balance.submitN', { n: changes.length }));
     } else if (placed.size) {
-      submitBtn = h('button', { class: 'btn submit done', disabled: true }, '✓ 투표 완료됨');
+      submitBtn = h('button', { class: 'btn submit done', disabled: true }, t('balance.submitted'));
     } else {
-      submitBtn = h('button', { class: 'btn submit', disabled: true }, '투표 완료');
+      submitBtn = h('button', { class: 'btn submit', disabled: true }, t('balance.submit'));
     }
     const draftNote = changes.length
-      ? h('span', { class: 'draft-note' }, `임시 저장됨 · 아직 제출하지 않은 변경 ${changes.length}개`)
-      : placed.size ? h('span', { class: 'draft-note ok' }, '제출한 표와 같습니다') : null;
+      ? h('span', { class: 'draft-note' }, t('balance.draftN', { n: changes.length }))
+      : placed.size ? h('span', { class: 'draft-note ok' }, t('balance.same')) : null;
 
     render(
       boardHeader('balance', template),
@@ -565,14 +577,14 @@ function viewBalance(templateId) {
           h('h1', { class: 'board-h1' }, `${template.title}`),
           h('div', { class: 'board-progress' },
             progressBar(placed.size, template.items.length),
-            h('span', {}, `${placed.size} / ${template.items.length} 분류`),
+            h('span', {}, t('balance.sorted', { n: placed.size, total: template.items.length })),
             draftNote,
             statusEl),
         ),
         h('div', { class: 'actions' },
           submitBtn,
-          h('a', { class: 'btn', href: `#/balance/${template.id}/results` }, '모두의 결과'),
-          h('a', { class: 'btn ghost', href: '#/balance/mine' }, '내 투표'),
+          h('a', { class: 'btn', href: `#/balance/${template.id}/results` }, t('balance.results')),
+          h('a', { class: 'btn ghost', href: '#/balance/mine' }, t('balance.mine')),
         ),
       ),
       usageHint('balance'),
@@ -584,7 +596,7 @@ function viewBalance(templateId) {
     const changes = unsubmittedChanges(catId, mine, template.items.map(i => i.id));
     if (!changes.length) return;
     const ok = await submitChanges(catId, changes, id => template.byId.get(id).key);
-    toast(ok ? `투표 ${changes.length}개를 제출했습니다` : '서버에 연결하지 못했습니다. 이 기기에 보관해 두고 자동으로 다시 보냅니다.');
+    toast(ok ? t('balance.submittedN', { n: changes.length }) : t('sync.offline'));
     const scrollY = window.scrollY;
     draw();
     window.scrollTo(0, scrollY);
@@ -594,16 +606,16 @@ function viewBalance(templateId) {
 }
 
 const SORTS = {
-  nerf: { label: '사기 비율 높은 순', score: c => (c[0] + 1) / (sum(c) + 3) },
-  buff: { label: '약함 비율 높은 순', score: c => (c[2] + 1) / (sum(c) + 3) },
-  fair: { label: '적당함 비율 높은 순', score: c => (c[1] + 1) / (sum(c) + 3) },
-  split: { label: '의견이 갈리는 순', score: c => Math.min(c[0], c[2]) / (sum(c) + 3) },
-  votes: { label: '표가 많은 순', score: c => sum(c) },
+  nerf: { score: c => (c[0] + 1) / (sum(c) + 3) },
+  buff: { score: c => (c[2] + 1) / (sum(c) + 3) },
+  fair: { score: c => (c[1] + 1) / (sum(c) + 3) },
+  split: { label: 'sort.split', score: c => Math.min(c[0], c[2]) / (sum(c) + 3) },
+  votes: { label: 'sort.votes', score: c => sum(c) },
 };
 const sum = c => c[0] + c[1] + c[2];
 const sortLabel = (k, verdicts) => {
   const i = { nerf: 0, fair: 1, buff: 2 }[k];
-  return i == null ? SORTS[k].label : `${verdicts[i].sub} 비율 높은 순`;
+  return i == null ? t(SORTS[k].label) : t('sort.share', { v: verdicts[i].sub });
 };
 const pct = (n, total) => (total ? Math.round((n / total) * 100) : 0);
 
@@ -618,8 +630,8 @@ const FACET_COLOR = {
 const itemGroups = item => [...new Set([item.group, ...(item.groups || [])].filter(Boolean))];
 
 function resultFacetName(cat, f) {
-  if (f === 'group') return cat.groupLabel || '분류';
-  return { rarity: '희귀도', type: '종류', source: '고대의 존재' }[f];
+  if (f === 'group') return groupLabel(cat);
+  return t(`facet.${f}`);
 }
 
 function resultFacets(template) {
@@ -646,7 +658,7 @@ function bucketRows(template, f, rows) {
   const has = (item, v) => (f === 'group' ? itemGroups(item).includes(v) : item[f] === v);
   const buckets = keys.map(k => ({ ...k, rows: rows.filter(r => has(r.item, k.value)) }));
   const rest = rows.filter(r => !keys.some(k => has(r.item, k.value)));
-  if (rest.length) buckets.push({ value: '', label: '기타', rows: rest });
+  if (rest.length) buckets.push({ value: '', label: t('facet.other'), rows: rest });
   return buckets.filter(b => b.rows.length);
 }
 
@@ -660,15 +672,15 @@ async function viewResults(templateId) {
   let facet = facets[0] || '';
   flush();
 
-  render(h('section', { class: 'empty' }, h('p', {}, '결과를 불러오는 중…')));
+  render(h('section', { class: 'empty' }, h('p', {}, t('results.loading'))));
   let results;
   try {
     results = await fetchResults(template.category.id);
   } catch {
     render(h('section', { class: 'empty' },
-      h('h2', {}, '결과 서버에 연결하지 못했습니다'),
-      h('p', {}, '잠시 후 다시 시도해 주세요. 투표는 이 기기에 보관되어 있다가 연결되면 전송됩니다.'),
-      h('p', {}, h('a', { class: 'btn', href: `#/balance/${template.id}` }, '투표로 돌아가기')),
+      h('h2', {}, t('results.offline')),
+      h('p', {}, t('results.offlineBody')),
+      h('p', {}, h('a', { class: 'btn', href: `#/balance/${template.id}` }, t('results.back'))),
     ));
     return;
   }
@@ -688,42 +700,42 @@ async function viewResults(templateId) {
     const body = buckets
       ? buckets.map(b => h('section', { class: 'result-sec' },
         h('h2', { class: 'block-title', style: { '--accent': b.color || 'var(--gold)' } }, b.label,
-          h('span', { class: 'my-sec-count' }, `${b.rows.length}개`)),
+          h('span', { class: 'my-sec-count' }, t('n.items', { n: b.rows.length }))),
         view(b.rows)))
       : view(sorted);
     render(
       boardHeader('balance', template),
       h('div', { class: 'board-head' },
         h('div', { class: 'board-title' },
-          h('h1', { class: 'board-h1' }, `${template.title} · 모두의 결과`),
+          h('h1', { class: 'board-h1' }, `${template.title} · ${t('balance.results')}`),
           h('div', { class: 'board-progress' },
-            h('span', {}, `${voted.length}개 항목 · 총 ${totalVotes}표`),
-            myInTemplate > 0 && h('span', { class: 'my-count' }, `내 표 ${myInTemplate}개`)),
+            h('span', {}, t('results.summary', { n: voted.length, votes: totalVotes })),
+            myInTemplate > 0 && h('span', { class: 'my-count' }, t('results.mineN', { n: myInTemplate }))),
         ),
         h('div', { class: 'actions' },
-          h('a', { class: 'btn', href: `#/balance/${template.id}` }, '내 투표로'),
-          myInTemplate > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': '표시 범위' },
-            h('button', { class: onlyMine ? null : 'on', onclick: () => { onlyMine = false; draw(); } }, '전체'),
-            h('button', { class: onlyMine ? 'on' : null, onclick: () => { onlyMine = true; draw(); } }, '내 표만'),
+          h('a', { class: 'btn', href: `#/balance/${template.id}` }, t('results.toMine')),
+          myInTemplate > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': t('results.scope') },
+            h('button', { class: onlyMine ? null : 'on', onclick: () => { onlyMine = false; draw(); } }, t('filter.all')),
+            h('button', { class: onlyMine ? 'on' : null, onclick: () => { onlyMine = true; draw(); } }, t('results.onlyMine')),
           ),
-          facets.length > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': '나눠 보기' },
-            facets.map(f => h('button', { class: facet === f ? 'on' : null, onclick: () => { facet = f; draw(); } }, `${resultFacetName(template.category, f)}별`)),
-            h('button', { class: facet ? null : 'on', onclick: () => { facet = ''; draw(); } }, '한 번에'),
+          facets.length > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': t('results.splitBy') },
+            facets.map(f => h('button', { class: facet === f ? 'on' : null, onclick: () => { facet = f; draw(); } }, t('results.byFacet', { facet: resultFacetName(template.category, f) }))),
+            h('button', { class: facet ? null : 'on', onclick: () => { facet = ''; draw(); } }, t('results.noSplit')),
           ),
-          h('div', { class: 'seg', role: 'group', 'aria-label': '보기 방식' },
-            h('button', { class: layout === 'list' ? 'on' : null, onclick: () => { layout = 'list'; draw(); } }, '목록'),
-            h('button', { class: layout === 'board' ? 'on' : null, onclick: () => { layout = 'board'; draw(); } }, '보드'),
+          h('div', { class: 'seg', role: 'group', 'aria-label': t('results.layout') },
+            h('button', { class: layout === 'list' ? 'on' : null, onclick: () => { layout = 'list'; draw(); } }, t('results.list')),
+            h('button', { class: layout === 'board' ? 'on' : null, onclick: () => { layout = 'board'; draw(); } }, t('results.board')),
           ),
-          layout === 'list' && h('select', { 'aria-label': '정렬', onchange: e => { sort = e.target.value; draw(); } },
+          layout === 'list' && h('select', { 'aria-label': t('results.sort'), onchange: e => { sort = e.target.value; draw(); } },
             Object.entries(SORTS).map(([k, s]) => h('option', { value: k, selected: k === sort }, sortLabel(k, VERDICTS)))),
         ),
       ),
       voted.length ? body : h('section', { class: 'empty' },
-        h('h2', {}, '아직 표가 없습니다'),
-        h('p', {}, '첫 투표를 남겨 주세요.'),
-        h('p', {}, h('a', { class: 'btn primary', href: `#/balance/${template.id}` }, '투표하러 가기')),
+        h('h2', {}, t('results.empty')),
+        h('p', {}, t('results.emptyBody')),
+        h('p', {}, h('a', { class: 'btn primary', href: `#/balance/${template.id}` }, t('results.goVote'))),
       ),
-      voted.length && rows.length > voted.length && h('p', { class: 'help' }, `아직 표가 없는 항목 ${rows.length - voted.length}개는 표시하지 않았습니다.`),
+      voted.length && rows.length > voted.length && h('p', { class: 'help' }, t('results.hidden', { n: rows.length - voted.length })),
     );
   }
 
@@ -731,7 +743,7 @@ async function viewResults(templateId) {
     const list = h('ol', { class: 'result-list' }, sorted.map(({ item, c }) => {
       const total = sum(c);
       return h('li', {
-        class: `result${total < 5 ? ' few' : ''}`, tabindex: '0', role: 'button', 'aria-label': `${item.name} 자세히`,
+        class: `result${total < 5 ? ' few' : ''}`, tabindex: '0', role: 'button', 'aria-label': t('detail.open', { name: item.name }),
         onclick: () => openDetail(item, template.category, db),
         onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(item, template.category, db); } },
       },
@@ -746,7 +758,7 @@ async function viewResults(templateId) {
           ),
           h('div', { class: 'result-legend' },
             VERDICTS.map((v, i) => h('span', {}, h('i', { style: { background: v.color } }), `${v.sub} ${pct(c[i], total)}%`)),
-            h('span', { class: 'n' }, `${total}표`),
+            h('span', { class: 'n' }, t('n.votes', { n: total })),
           ),
         ),
       );
@@ -775,7 +787,7 @@ async function viewResults(templateId) {
       decorate: (el, item) => {
         el.append(h('span', { class: 'badge' }, `${share.get(item.id)}%`));
         const v = VERDICTS.find(x => x.v === mine[item.id]);
-        if (v) el.append(h('span', { class: 'mine-dot', style: { background: v.color }, title: `내 표: ${v.label}` }, '내'));
+        if (v) el.append(h('span', { class: 'mine-dot', style: { background: v.color }, title: t('my.vote', { v: v.label }) }, t('my.dot')));
       },
     });
   }
@@ -797,9 +809,9 @@ function myChip(verdicts, v, c) {
   }
   return h('span', { class: 'my-chip', style: { '--v': mine.color } },
     h('i', { 'aria-hidden': 'true' }),
-    `내 표: ${mine.label}`,
-    agree === true && h('em', { class: 'agree' }, '· 다수와 같음'),
-    agree === false && h('em', { class: 'differ' }, '· 소수 의견'),
+    t('my.vote', { v: mine.label }),
+    agree === true && h('em', { class: 'agree' }, `· ${t('my.agree')}`),
+    agree === false && h('em', { class: 'differ' }, `· ${t('my.differ')}`),
   );
 }
 
@@ -817,12 +829,12 @@ async function viewMyVotes() {
 
   if (!cats.length) {
     render(
-      crumbs('balance', ['내 투표']),
+      crumbs('balance', [t('balance.mine')]),
       h('section', { class: 'empty' },
-        h('h2', {}, '아직 제출한 표가 없습니다'),
-        h('p', {}, '항목을 칸에 옮긴 뒤 "투표 완료"를 누르면 여기에 모입니다.'),
-        pending > 0 && h('p', { class: 'draft-note' }, `제출하지 않은 변경 ${pending}개가 있습니다.`),
-        h('p', {}, h('a', { class: 'btn primary', href: '#/balance' }, '투표하러 가기')),
+        h('h2', {}, t('my.empty')),
+        h('p', {}, t('my.emptyBody')),
+        pending > 0 && h('p', { class: 'draft-note' }, t('my.pendingN', { n: pending })),
+        h('p', {}, h('a', { class: 'btn primary', href: '#/balance' }, t('results.goVote'))),
       ),
     );
     return;
@@ -843,7 +855,7 @@ async function viewMyVotes() {
       const list = ids
         .filter(id => filter === 'all' || mine[id] === filter)
         .map(id => cat.byId.get(id))
-        .sort((a, b) => order[mine[a.id]] - order[mine[b.id]] || a.name.localeCompare(b.name, 'ko'));
+        .sort((a, b) => order[mine[a.id]] - order[mine[b.id]] || collator.compare(a.name, b.name));
       for (const item of list) {
         total++;
         const c = res?.[item.key];
@@ -858,14 +870,14 @@ async function viewMyVotes() {
       const pseudo = { tile: cat.tile, byId: cat.byId };
       return h('section', { class: 'block' },
         h('div', { class: 'my-sec-head' },
-          h('h2', { class: 'block-title' }, cat.name, h('span', { class: 'my-sec-count' }, `${list.length}개`)),
-          h('a', { class: 'btn small', href: editHref }, '고치러 가기'),
+          h('h2', { class: 'block-title' }, cat.name, h('span', { class: 'my-sec-count' }, t('n.items', { n: list.length }))),
+          h('a', { class: 'btn small', href: editHref }, t('my.edit')),
         ),
         h('ol', { class: 'result-list my-list' }, list.map(item => {
           const c = res?.[item.key];
           const n = c ? sum(c) : 0;
           return h('li', {
-            class: 'result', tabindex: '0', role: 'button', 'aria-label': `${item.name} 자세히`,
+            class: 'result', tabindex: '0', role: 'button', 'aria-label': t('detail.open', { name: item.name }),
             onclick: () => openDetail(item, cat, db),
             onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(item, cat, db); } },
           },
@@ -876,8 +888,8 @@ async function viewMyVotes() {
               myChip(VERDICTS, mine[item.id], c),
               n > 0 ? h('div', { class: 'bar small', role: 'img', 'aria-label': VERDICTS.map((v, i) => `${v.sub} ${pct(c[i], n)}%`).join(', ') },
                 VERDICTS.map((v, i) => c[i] > 0 && h('span', { style: { flexGrow: c[i], background: v.color } }, pct(c[i], n) >= 14 ? `${pct(c[i], n)}%` : '')))
-                : h('div', { class: 'result-legend' }, res ? '아직 다른 표가 없습니다' : '모두의 결과를 불러오지 못했습니다'),
-              n > 0 && h('div', { class: 'result-legend' }, h('span', { class: 'n' }, `모두 ${n}표`)),
+                : h('div', { class: 'result-legend' }, res ? t('my.noOthers') : t('my.resultsFailed')),
+              n > 0 && h('div', { class: 'result-legend' }, h('span', { class: 'n' }, t('my.allVotes', { n }))),
             ),
           );
         })),
@@ -886,22 +898,22 @@ async function viewMyVotes() {
 
     const VERDICTS = verdictsFor('');
     render(
-      crumbs('balance', ['내 투표']),
+      crumbs('balance', [t('balance.mine')]),
       h('header', { class: 'page-head' },
-        h('h1', {}, '내 투표'),
-        h('p', {}, '이 기기에서 제출한 표입니다. 항목을 누르면 자세히 볼 수 있습니다.'),
+        h('h1', {}, t('balance.mine')),
+        h('p', {}, t(currentUser() ? 'acct.my.lead' : 'my.lead')),
       ),
       h('div', { class: 'my-summary' },
-        h('div', { class: 'my-stat' }, h('strong', {}, String(total)), h('span', {}, '제출한 표')),
-        compared > 0 && h('div', { class: 'my-stat' }, h('strong', {}, `${pct(agree, compared)}%`), h('span', {}, `다수 의견과 같음 (${agree}/${compared})`)),
-        pending > 0 && h('div', { class: 'my-stat warn' }, h('strong', {}, String(pending)), h('span', {}, '제출하지 않은 변경')),
+        h('div', { class: 'my-stat' }, h('strong', {}, String(total)), h('span', {}, t('my.submitted'))),
+        compared > 0 && h('div', { class: 'my-stat' }, h('strong', {}, `${pct(agree, compared)}%`), h('span', {}, t('my.agreeRate', { agree, compared }))),
+        pending > 0 && h('div', { class: 'my-stat warn' }, h('strong', {}, String(pending)), h('span', {}, t('my.pending'))),
       ),
-      h('div', { class: 'seg my-filter', role: 'group', 'aria-label': '판정으로 거르기' },
-        h('button', { class: filter === 'all' ? 'on' : null, onclick: () => { filter = 'all'; draw(); } }, '전체'),
+      h('div', { class: 'seg my-filter', role: 'group', 'aria-label': t('my.filterAria') },
+        h('button', { class: filter === 'all' ? 'on' : null, onclick: () => { filter = 'all'; draw(); } }, t('filter.all')),
         VERDICTS.map(v => h('button', { class: filter === v.v ? 'on' : null, onclick: () => { filter = v.v; draw(); } }, v.label)),
       ),
       sections,
-      h('p', { class: 'help' }, '표는 이 브라우저에만 기록됩니다. 다른 기기나 브라우저에서는 보이지 않습니다.'),
+      h('p', { class: 'help' }, t(currentUser() ? 'acct.my.synced' : 'my.localOnly')),
     );
   }
 
@@ -910,19 +922,32 @@ async function viewMyVotes() {
 
 // ---------------------------------------------------------------- 시작
 
+// 상단 오른쪽: 언어 선택 (로그인 버튼도 여기에 붙는다)
+function langPicker() {
+  return h('label', { class: 'lang-pick', title: 'Language' },
+    h('span', { class: 'sr-only' }, 'Language'),
+    h('span', { class: 'lang-icon', 'aria-hidden': 'true' }, '🌐'),
+    h('select', { onchange: e => setLang(e.target.value) },
+      LANGS.map(l => h('option', { value: l.code, selected: l.code === lang }, l.name))),
+  );
+}
+
 async function start() {
+  translateStatic();
+  document.getElementById('topbar-right').append(...[community.topbar(ctx), langPicker()].flat().filter(Boolean));
   try {
     db = await loadData();
+    await community.init(ctx);
   } catch (err) {
     console.error(err);
     render(h('section', { class: 'empty' },
-      h('h2', {}, '게임 데이터를 불러오지 못했습니다'),
-      h('p', {}, '잠시 후 새로고침해 주세요.'),
+      h('h2', {}, t('data.failed')),
+      h('p', {}, t('data.failedBody')),
     ));
     return;
   }
   const v = document.getElementById('data-version');
-  if (v && db.fetchedAt) v.textContent = `데이터 수집 ${db.fetchedAt.slice(0, 10)}`;
+  if (v && db.fetchedAt) v.textContent = t('data.version', { date: db.fetchedAt.slice(0, 10) });
   window.addEventListener('hashchange', route);
   route();
 }

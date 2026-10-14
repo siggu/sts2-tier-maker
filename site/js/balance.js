@@ -1,28 +1,31 @@
 // 밸런스 투표: 끌어다 놓은 내용은 브라우저에 임시 저장(초안)하고,
 // '투표 완료'를 누르면 마지막으로 제출한 것과 달라진 표만 서버로 보낸다.
 
+import { t } from './i18n.js';
+import { authHeaders, dropSession } from './auth.js';
+
 const override = new URLSearchParams(location.search).get('api');
 export const API_BASE = override || 'https://sts2-balance-api.siggu100.workers.dev';
 
 export const VERDICTS = [
-  { v: 'nerf', label: '너프 필요', sub: '사기', color: '#e5484d' },
-  { v: 'fair', label: '적당함', sub: '밸런스 OK', color: '#b9ae95' },
-  { v: 'buff', label: '버프 필요', sub: '약함', color: '#57a7d8' },
+  { v: 'nerf', label: t('verdict.nerf'), sub: t('verdict.nerf.sub'), color: '#e5484d' },
+  { v: 'fair', label: t('verdict.fair'), sub: t('verdict.fair.sub'), color: '#b9ae95' },
+  { v: 'buff', label: t('verdict.buff'), sub: t('verdict.buff.sub'), color: '#57a7d8' },
 ];
 
 // 종류마다 '사기/약함'의 뜻이 달라서 보조 설명만 바꾼다. 집계는 모두 nerf/fair/buff 3단계.
 const VERDICT_SUBS = {
-  characters: ['너무 강함', '밸런스 OK', '너무 약함'],
-  ancients: ['축복이 사기', '밸런스 OK', '축복이 약함'],
-  monsters: ['너무 어려움', '밸런스 OK', '너무 쉬움'],
-  elites: ['너무 어려움', '밸런스 OK', '너무 쉬움'],
-  bosses: ['너무 어려움', '밸런스 OK', '너무 쉬움'],
-  curses: ['너무 가혹함', '밸런스 OK', '거의 무해함'],
+  characters: 'strength',
+  ancients: 'blessing',
+  monsters: 'difficulty',
+  elites: 'difficulty',
+  bosses: 'difficulty',
+  curses: 'harshness',
 };
 
 export function verdictsFor(categoryId) {
-  const subs = VERDICT_SUBS[categoryId];
-  return subs ? VERDICTS.map((v, i) => ({ ...v, sub: subs[i] })) : VERDICTS;
+  const kind = VERDICT_SUBS[categoryId];
+  return kind ? VERDICTS.map(v => ({ ...v, sub: t(`verdict.${v.v}.${kind}`) })) : VERDICTS;
 }
 
 const MINE_KEY = cat => `sts2bal.v1.${cat}`;
@@ -37,7 +40,7 @@ function write(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* 저장소 없음 */ }
 }
 
-function voterId() {
+export function voterId() {
   let id = read(VOTER_KEY, null);
   if (!id) {
     const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -129,10 +132,13 @@ export async function flush() {
   try {
     const res = await fetch(`${API_BASE}/balance`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // 로그인 상태면 서버가 voter 대신 계정으로 기록한다.
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ voter: voterId(), votes: entries.slice(0, 300).map(([item, v]) => ({ item, v })) }),
       keepalive: true,
     });
+    // 세션이 만료됐으면 로그인을 풀고 익명으로 다시 보낸다.
+    if (res.status === 401) { dropSession(); throw new Error('auth'); }
     if (!res.ok && res.status !== 400) throw new Error(String(res.status));
     // 보내는 동안 새로 쌓인 표는 남긴다
     const now = read(PENDING_KEY, {});

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alignValues, renderKo, renderKoBoth, splitKeywords, withKeywords } from '../l10n.mjs';
+import { alignValues, normalizeWiki, renderKo, renderKoBoth, specialize, splitKeywords, withKeywords } from '../l10n.mjs';
 
 const strip = s => s.replace(/<[^>]+>/g, '');
 
@@ -40,4 +40,77 @@ test('위키 틀과 키워드 줄을 걸러 낸다', () => {
 
 test('맞지 않으면 null', () => {
   assert.equal(alignValues('Deal {Damage:diff()} damage.', 'Gain 5 Block.'), null);
+});
+
+test('단·복수 문구 안의 값을 읽고, 단수 문구면 1 로 본다', () => {
+  const en = 'At the start of the next {Combats:plural:combat|[blue]{}[/blue] combats}, gain [blue]{StrengthPower}[/blue] [gold]Strength[/gold].';
+  const ja = '次の[blue]{Combats}[/blue]回の戦闘開始時、[gold]筋力[/gold][blue]{StrengthPower}[/blue]を得る。';
+  assert.equal(strip(renderKo(ja, alignValues(en, 'At the start of the next 5 combats, gain 2 $Strength.'))), '次の5回の戦闘開始時、筋力2を得る。');
+  assert.equal(alignValues(en, 'At the start of the next combat, gain 2 Strength.').Combats.base.n, '1');
+  // 위키 [전|후] 묶음 안의 단·복수 문구
+  const buffer = alignValues('Prevent the next {BufferPower:plural:time|{BufferPower:diff()} times} you would lose HP.', 'Prevent the next [time|2 times] you would lose HP.');
+  assert.deepEqual(buffer.BufferPower, { base: { n: '1' }, up: { n: '2' } });
+  // cond 서식, 이름 없는 {:diff()}
+  const punch = alignValues('This turn, your next {Attacks:cond:>1?{Attacks:diff()} Attacks are|Attack is} played an extra time.', 'This turn, your next [Attack is|2 Attacks are] played an extra time.');
+  assert.deepEqual(punch.Attacks, { base: { n: '1' }, up: { n: '2' } });
+  const rod = alignValues('At the start of the next {LightningRodPower:plural:turn|{:diff()} turns}, [gold]Channel[/gold] 1 [gold]Lightning[/gold].', 'At the start of the next 2 turns, Channel 1 Lightning.');
+  assert.equal(rod.LightningRodPower.base.n, '2');
+  // 수 뒤에 낱말이 붙은 묶음은 수만
+  const draw = alignValues('Draw {Cards:diff()} {Cards:plural:card|cards}.', 'Draw [1 card|2 cards].');
+  assert.deepEqual(draw.Cards, { base: { n: '1' }, up: { n: '2' } });
+});
+
+test('강화 문구 안의 값 ({IfUpgraded:show:{Cards} copies|a copy})', () => {
+  const v = alignValues('Add {IfUpgraded:show:{Cards} copies|a copy} of that card into your [gold]Hand[/gold].', 'Add [a copy|2 copies] of that card into your Hand.');
+  const ko = '그 카드의 복사본을 {IfUpgraded:show:{Cards}장|1장} [gold]손[/gold]으로 가져옵니다.';
+  assert.equal(strip(renderKo(ko, v)), '그 카드의 복사본을 1장 손으로 가져옵니다.');
+  assert.equal(strip(renderKo(ko, v, { upgraded: true })), '그 카드의 복사본을 2장 손으로 가져옵니다.');
+  const stack = alignValues('Gain [gold]Block[/gold] equal to the number of cards in your [gold]Discard Pile[/gold]{IfUpgraded:show: +{CalculationBase}|}.', 'Gain $Block equal to the number of cards in your Discard Pile[| +3].');
+  assert.equal(stack.CalculationBase.up.n, '3');
+});
+
+test('X 코스트, 0 에너지, 아이콘 강화 표기', () => {
+  assert.equal(normalizeWiki('Play the top [X|X+1] cards.'), 'Play the top X[|+1] cards.');
+  assert.ok(alignValues('Play the top X{IfUpgraded:show:+1} cards of your [gold]Draw Pile[/gold].', 'Play the top [X|X+1] cards of your Draw Pile.'));
+  assert.ok(alignValues('[gold]Channel[/gold] {IfUpgraded:show:X+1|X} [gold]Lightning[/gold].', 'Channel [X|X+1] Lightning.'));
+  // "0 @CE" 는 지우지 않는다
+  assert.equal(normalizeWiki('costs 0 @CE. Gain 2 @CE.'), 'costs 0 @CE. Gain @CE@CE.');
+  const pounce = alignValues('Deal {Damage:diff()} damage.\nThe next Skill you play costs 0 {energyPrefix:energyIcons(1)}.', 'Deal [14|20] damage.<br>The next Skill you play costs 0 @CE.');
+  assert.equal(strip(renderKo('다음 스킬의 비용이 0 {energyPrefix:energyIcons(1)}이 됩니다.', pounce)), '다음 스킬의 비용이 0 ⚡이 됩니다.');
+  // 고정 숫자 "1 {energyIcons(1)}" 를 위키가 아이콘만으로 적은 경우
+  assert.ok(alignValues('Reduce this card\'s cost by 1 {energyPrefix:energyIcons(1)} until played.', 'Reduce this card\'s cost by 1 @DE until played.'));
+  // 값 + 고정 아이콘이 "1 @CE" 하나로 합쳐진 경우
+  const curious = alignValues('Powers cost {CuriousReduction:diff()} {energyPrefix:energyIcons(1)} less.', 'Powers cost 1 @CE less.');
+  assert.equal(strip(renderKo('파워 카드의 비용이 {CuriousReduction:diff()} {energyPrefix:energyIcons(1)} 감소합니다.', curious)), '파워 카드의 비용이 1 ⚡ 감소합니다.');
+  // "@CE@CE[|@CE]" → 강화 전 2개, 후 3개
+  const prod = alignValues('Gain {Energy:energyIcons()}.', 'Gain @CE@CE[|@CE].');
+  assert.deepEqual([prod.Energy.base.n, prod.Energy.up.n], [2, 3]);
+});
+
+test('위키가 빼먹는 끝 마침표·쉼표·"Upon pickup,"', () => {
+  assert.ok(alignValues('Gain {Stars:starIcons()}.', 'Gain @ST@ST@ST'));
+  assert.ok(alignValues('At the start of each combat, put a random Power into your [gold]Hand[/gold].', 'At the start of each combat put a random Power into your Hand.'));
+  assert.ok(alignValues('Upon pickup, choose [blue]1[/blue] of [blue]2[/blue] packs of cards to add to your [gold]Deck[/gold].', 'Choose 1 of 2 packs of cards to add to your Deck.'));
+  assert.ok(alignValues('[gold]Exhaust[/gold] your [gold]Hand[/gold].\nAdd 1 random {IfUpgraded:show:[gold]Upgraded[/gold] |}card into your [gold]Hand[/gold].', 'Exhaust your Hand.<br>Add 1 random [|$Upgraded] card into your Hand.'));
+});
+
+test('키워드: 마침표 없는 표기, 일본어·중국어 문장 부호', () => {
+  const { text, keywords } = splitKeywords('[|$Innate<br>]Gain 8 $Block.<br>[Exhaust|]');
+  assert.equal(text.replace(/<br>/g, ' ').trim(), 'Gain 8 $Block.');
+  assert.deepEqual(keywords.map(k => [k.kw, k.base, k.up]), [['Innate', false, true], ['Exhaust', true, false]]);
+  assert.equal(strip(withKeywords('ブロックを得る。', keywords, { Innate: '天賦', Exhaust: '廃棄' }, false, false, '。')), 'ブロックを得る。廃棄。');
+  assert.equal(strip(withKeywords('', splitKeywords('$Unplayable.<br>$Ethereal.').keywords, { Unplayable: '无法打出', Ethereal: '虚无' }, false, false, '。')), '无法打出。虚无。');
+  // 중국어·일본어 줄바꿈은 띄우지 않고 잇는다 (한국어는 띄운다)
+  assert.equal(renderKo('获得{Block:diff()}点格挡。\n抽1张牌。', { Block: { base: { n: '5' }, up: { n: '5' } } }), '获得5点格挡。抽1张牌。');
+  assert.equal(renderKo('방어도를 {Block:diff()} 얻습니다.\n카드를\n1장 뽑습니다.', { Block: { base: { n: '5' }, up: { n: '5' } } }), '방어도를 5 얻습니다. 카드를 1장 뽑습니다.');
+});
+
+test('선택지로 갈리는 틀을 고정한다 (괴짜 과학)', () => {
+  const tmpl = '{CardType:choose(Attack|Skill|Power):Deal {Damage:diff()} damage{Violence: {ViolenceHits:diff()} times|}.|Gain {Block:diff()} [gold]Block[/gold].||???}{HasRider:{Sapping:\nApply {SappingWeak:diff()} [gold]Weak[/gold].|}{Wisdom:\nDraw {WisdomCards:diff()} cards.|}{Curious:Powers cost {CuriousReduction:diff()} less.|}|{CardType:choose(Attack|Skill|Power):\n???|\n???|???|???}}';
+  const pick = (type, rider) => specialize(tmpl, { CardType: type, HasRider: true, Violence: rider === 'Violence', Sapping: rider === 'Sapping', Wisdom: rider === 'Wisdom', Curious: rider === 'Curious' });
+  assert.equal(pick('Attack', 'Violence'), 'Deal {Damage:diff()} damage {ViolenceHits:diff()} times.');
+  assert.equal(pick('Attack', 'Sapping'), 'Deal {Damage:diff()} damage.\nApply {SappingWeak:diff()} [gold]Weak[/gold].');
+  assert.equal(pick('Skill', 'Wisdom'), 'Gain {Block:diff()} [gold]Block[/gold].\nDraw {WisdomCards:diff()} cards.');
+  assert.equal(pick('Power', 'Curious'), 'Powers cost {CuriousReduction:diff()} less.');
+  assert.equal(specialize('{HasRider:A|B}', { HasRider: false }), 'B');
 });

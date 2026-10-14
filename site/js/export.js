@@ -1,5 +1,7 @@
 // 티어 리스트를 PNG 로 그린다. 이미지는 같은 출처라 캔버스가 오염되지 않는다.
 
+import { t } from './i18n.js';
+
 const TILE = {
   card: { w: 96, h: 124 },
   portrait: { w: 96, h: 124 },
@@ -131,7 +133,7 @@ export async function renderPng(template, state) {
 
   ctx.fillStyle = 'rgba(233,226,207,.55)';
   ctx.font = '500 14px "Pretendard Variable", sans-serif';
-  ctx.fillText('siggu.github.io/sts2 · Slay the Spire 2 티어 메이커 (비공식)', PAD, height - 24);
+  ctx.fillText(`siggu.github.io/sts2-tier-maker · ${t('png.footer')}`, PAD, height - 24);
 
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }

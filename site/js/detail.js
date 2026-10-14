@@ -2,7 +2,9 @@
 // 텍스트 필드(text, textUp, moves[].text, flavor)는 수집 스크립트가 이스케이프한 뒤 만든 HTML 이다.
 
 import { h } from './ui.js';
-import { rarityKo, typeKo } from './data.js';
+import { rarityName, typeName } from './data.js';
+import { t, lang } from './i18n.js';
+import { detailExtras } from './community.js';
 
 let current = null;
 
@@ -11,19 +13,19 @@ export function openDetail(item, category, db) {
   const restore = document.activeElement;
   let showUp = false;
 
-  const panel = h('div', { class: 'detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': `${item.name} 상세 정보` });
+  const panel = h('div', { class: 'detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('detail.aria', { name: item.name }) });
   const backdrop = h('div', { class: 'detail-backdrop', onclick: e => { if (e.target === backdrop) closeDetail(); } }, panel);
 
   function render() {
     const img = showUp && item.imgUp ? item.imgUp : item.img;
     const canUpgrade = Boolean(item.imgUp || item.textUp || item.costUp !== undefined);
     panel.replaceChildren(
-      h('button', { class: 'detail-close', 'aria-label': '닫기', onclick: closeDetail }, '×'),
+      h('button', { class: 'detail-close', 'aria-label': t('detail.close'), onclick: closeDetail }, '×'),
       h('div', { class: `detail-media kind-${category.tile}` },
         img ? h('img', {
           src: img, alt: item.name,
           class: canUpgrade ? 'flip' : null,
-          title: canUpgrade ? '눌러서 강화 전/후 전환' : null,
+          title: canUpgrade ? t('detail.flip') : null,
           onclick: canUpgrade ? toggle : null,
           onerror: e => { if (showUp) { e.target.src = item.img; } },
         }) : h('div', { class: 'detail-noimg' }, item.name),
@@ -33,7 +35,7 @@ export function openDetail(item, category, db) {
           onclick: toggle,
         },
           h('span', { class: 'switch-track', 'aria-hidden': 'true' }, h('span', { class: 'switch-knob' })),
-          h('span', { class: 'switch-label' }, showUp ? '강화 후 ✦' : '강화 전'),
+          h('span', { class: 'switch-label' }, showUp ? `${t('detail.upgraded')} ✦` : t('detail.base')),
         ),
       ),
       h('div', { class: 'detail-body' },
@@ -41,11 +43,12 @@ export function openDetail(item, category, db) {
         item.nameEn && item.nameEn !== item.name && h('div', { class: 'detail-sub' }, item.nameEn),
         meta(item, category),
         ...bodyFor(item, category, db, showUp),
+        detailExtras(item, category, db),
         h('a', {
           class: 'detail-wiki',
           href: `https://slaythespire.wiki.gg/wiki/Special:Search?go=Go&search=${encodeURIComponent(`Slay the Spire 2:${item.nameEn || item.name}`)}`,
           target: '_blank', rel: 'noopener',
-        }, '위키에서 보기 ↗'),
+        }, `${t('detail.wiki')} ↗`),
       ),
     );
   }
@@ -81,19 +84,25 @@ function meta(item, category) {
   const chips = [
     item.groupName,
     item.area,
-    item.rarity && rarityKo(item.rarity),
-    item.type && typeKo(item.type),
-    item.source && `${category.labels?.source?.[item.source] || item.source}의 유물`,
+    item.rarity && rarityName(item.rarity),
+    item.type && typeName(item.type),
+    item.source && t('detail.relicOf', { name: category.labels?.source?.[item.source] || item.source }),
   ].filter((c, i, all) => c && all.indexOf(c) === i);
   return chips.length ? h('div', { class: 'detail-chips' }, chips.map(c => h('span', {}, c))) : null;
 }
 
 const html = (cls, content) => h('div', { class: cls, html: content });
 
+// 승천 수치(<span class="asc" data-asc="9">)에 '승천 9 이상' 설명을 붙인다.
+function ascTitles(el) {
+  for (const s of el.querySelectorAll('[data-asc]')) s.title = t('detail.ascFrom', { n: s.dataset.asc });
+  return el;
+}
+
 function costText(cost, stars) {
   const parts = [];
-  if (cost !== undefined && cost !== null && cost !== '') parts.push(`에너지 ${cost === -1 ? 'X' : cost}`);
-  if (stars !== undefined && stars !== null && stars !== '') parts.push(`별 ${stars}`);
+  if (cost !== undefined && cost !== null && cost !== '') parts.push(t('detail.energy', { n: cost === -1 ? 'X' : cost }));
+  if (stars !== undefined && stars !== null && stars !== '') parts.push(t('detail.stars', { n: stars }));
   return parts.join(' · ');
 }
 
@@ -105,16 +114,16 @@ function bodyFor(item, category, db, showUp = false) {
         item.members.length > 1 && h('h3', {}, m.name),
         (m.hp || m.hpAsc) && h('p', { class: 'detail-hp' },
           m.hp && `HP ${m.hp}`,
-          m.hpAsc && h('span', { class: 'asc' }, ` (승천 ${m.hpAsc})`)),
+          m.hpAsc && h('span', { class: 'asc' }, ` (${t('detail.asc', { n: m.hpAsc })})`)),
         m.moves.length > 0 && h('ul', { class: 'moves' }, m.moves.map(mv => h('li', {},
           h('b', { class: 'move-name' }, mv.name),
-          h('span', { html: mv.text }),
+          ascTitles(h('span', { html: mv.text })),
         ))),
       )),
       item.members.some(m => m.moves.some(mv => mv.text.includes('class="asc"'))) &&
-        h('p', { class: 'detail-note' }, h('span', { class: 'asc' }, '주황색'), ' 수치는 승천 난이도에서 바뀌는 값입니다.'),
-      item.members.some(m => m.moves.length) &&
-        h('p', { class: 'detail-note' }, '행동 설명은 위키의 영어 원문입니다.'),
+        h('p', { class: 'detail-note' }, h('span', { class: 'asc' }, t('detail.ascColor')), /^(ja|zh)/.test(lang) ? '' : ' ', t('detail.ascNote')),
+      lang !== 'en' && item.members.some(m => m.moves.length) &&
+        h('p', { class: 'detail-note' }, t('detail.movesEnglish')),
     ];
   }
 
@@ -126,7 +135,7 @@ function bodyFor(item, category, db, showUp = false) {
     return [
       cost && h('p', { class: `detail-cost${costChanged ? ' changed' : ''}` }, cost),
       html(`detail-text${showUp ? ' is-up' : ''}`, text),
-      item.textEn && h('p', { class: 'detail-note' }, '이 항목은 공식 한국어 효과를 아직 맞추지 못해 영어 원문을 보여 줍니다.'),
+      item.textEn && h('p', { class: 'detail-note' }, t('detail.textEnglish')),
     ];
   }
 
@@ -136,7 +145,7 @@ function bodyFor(item, category, db, showUp = false) {
     return [
       item.text && html('detail-text', item.text),
       relics.length > 0 && h('section', { class: 'detail-sec' },
-        h('h3', {}, `주는 유물 ${relics.length}개`),
+        h('h3', {}, t('detail.relicsN', { n: relics.length })),
         h('ul', { class: 'relic-list' }, relics.map(r => h('li', {},
           h('button', {
             class: 'relic-link', title: r.name,
@@ -151,7 +160,7 @@ function bodyFor(item, category, db, showUp = false) {
 
   return [
     item.text && html('detail-text', item.text),
-    item.textEn && h('p', { class: 'detail-note' }, '이 항목은 공식 한국어 효과를 아직 맞추지 못해 영어 원문을 보여 줍니다.'),
+    item.textEn && h('p', { class: 'detail-note' }, t('detail.textEnglish')),
     item.flavor && h('p', { class: 'detail-flavor', html: item.flavor }),
   ];
 }

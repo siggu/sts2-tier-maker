@@ -1,5 +1,7 @@
 // 게임 데이터 로딩과 템플릿 구성.
-// data/sts2.json 은 tools/fetch-data.mjs 가 위키에서 수집해 만든다.
+// data/sts2.json(영어)과 data/i18n/<언어>.json(이름·효과 번역)은 tools/fetch-data.mjs 가 만든다.
+
+import { lang, t, has, collator } from './i18n.js';
 //
 // {
 //   fetchedAt, source,
@@ -14,45 +16,64 @@
 // 한 번에 티어를 매기기에 적당한 최대 개수. 넘으면 희귀도·종류 등으로 쪼갠다.
 export const TEMPLATE_LIMIT = 70;
 
-export const RARITY_KO = {
-  basic: '기본', starter: '시작', common: '일반', uncommon: '고급', rare: '희귀',
-  shop: '상점', event: '이벤트', ancient: '고대', special: '특수', boss: '보스', curse: '저주', status: '상태이상',
-};
-export const TYPE_KO = { attack: '공격', skill: '스킬', power: '파워', status: '상태이상', curse: '저주', quest: '퀘스트' };
-const FACET_KO = { rarity: '희귀도', type: '종류', group: '캐릭터' };
-const OVERFLOW_KO = { source: '고대의 존재' };
+const RARITIES = ['basic', 'starter', 'common', 'uncommon', 'rare', 'shop', 'event', 'ancient', 'special', 'boss', 'curse', 'status'];
+const TYPES = ['attack', 'skill', 'power', 'status', 'curse', 'quest'];
 const ORDER = {
-  rarity: Object.keys(RARITY_KO),
-  type: Object.keys(TYPE_KO),
+  rarity: RARITIES,
+  type: TYPES,
   // 고대 유물을 주는 고대의 존재: 등장 막 순서
   source: ['Neow', 'Orobas', 'Pael', 'Tezcatara', 'Darv', 'Nonupeipe', 'Tanx', 'Vakuu'],
 };
 
-export const rarityKo = r => RARITY_KO[r] || r;
-export const typeKo = t => TYPE_KO[t] || t;
-export const facetLabel = (facet, value) => (facet === 'rarity' ? rarityKo(value) : facet === 'type' ? typeKo(value) : value);
-export const facetName = facet => FACET_KO[facet] || facet;
+export const rarityName = r => (has(`rarity.${r}`) ? t(`rarity.${r}`) : r);
+export const typeName = v => (has(`type.${v}`) ? t(`type.${v}`) : v);
+export const facetLabel = (facet, value) => (facet === 'rarity' ? rarityName(value) : facet === 'type' ? typeName(value) : value);
+// 그룹(캐릭터·막)의 이름: 카드·유물·포션은 '캐릭터', 고대의 존재·적은 '막'
+export const groupLabel = cat => t(cat.groupKind === 'act' ? 'facet.act' : 'facet.character');
 
 let loading = null;
 
+async function getJson(url) {
+  const r = await fetch(url, { cache: 'no-cache' });
+  if (!r.ok) throw new Error(`${url} ${r.status}`);
+  return r.json();
+}
+
 export function loadData() {
   if (!loading) {
-    loading = fetch('data/sts2.json', { cache: 'no-cache' })
-      .then(r => {
-        if (!r.ok) throw new Error(`data/sts2.json ${r.status}`);
-        return r.json();
-      })
-      .then(buildIndex);
+    // 번역 파일이 없거나 못 받아도 영어로 보여 준다.
+    const overlay = lang === 'en' ? Promise.resolve(null) : getJson(`data/i18n/${lang}.json`).catch(() => null);
+    loading = Promise.all([getJson('data/sts2.json'), overlay]).then(([raw, tr]) => buildIndex(raw, tr));
   }
   return loading;
 }
 
-function buildIndex(raw) {
+// 번역을 아이템에 덮어쓴다. 효과를 번역하지 못한 항목은 영어 효과를 두고 textEn 으로 표시.
+function translateItem(item, tr) {
+  const out = { ...item, nameEn: item.name };
+  if (!tr) return out;
+  for (const k of ['name', 'text', 'textUp', 'flavor', 'area']) if (tr[k]) out[k] = tr[k];
+  if (!tr.text && item.text && lang !== 'en') out.textEn = true;
+  if (item.members) {
+    out.members = item.members.map((m, i) => {
+      const tm = tr.members?.[i];
+      return { ...m, name: tm?.name || m.name, moves: m.moves.map((mv, j) => ({ ...mv, name: tm?.moves?.[j] || mv.name })) };
+    });
+  }
+  return out;
+}
+
+function buildIndex(raw, tr) {
   const categories = raw.categories.map(cat => {
-    const groups = cat.groups || [];
+    const groupNames = tr?.groups?.[cat.id] || {};
+    const groups = (cat.groups || []).map(g => ({ ...g, name: groupNames[g.id] || g.name }));
     const groupName = new Map(groups.map(g => [g.id, g.name]));
-    const items = cat.items.map(i => ({ ...i, key: `${cat.id}/${i.id}`, groupName: groupName.get(i.group) }));
-    return { ...cat, groups, items, byId: new Map(items.map(i => [i.id, i])) };
+    const labels = tr?.labels?.[cat.id] || cat.labels;
+    const items = cat.items
+      .map(i => ({ ...translateItem(i, tr?.items?.[`${cat.id}/${i.id}`]), key: `${cat.id}/${i.id}`, groupName: groupName.get(i.group) }))
+      .sort((a, b) => collator.compare(a.name, b.name));
+    const name = has(`cat.${cat.id}`) ? t(`cat.${cat.id}`) : cat.name;
+    return { ...cat, name, nameEn: cat.name, labels, groups, items, byId: new Map(items.map(i => [i.id, i])) };
   });
 
   const templates = categories.flatMap(buildTemplates);
@@ -112,7 +133,7 @@ function buildTemplates(cat) {
       const fi = cat.items.filter(i => i[f] === v);
       // 너무 많은 묶음(예: 고대 유물 100여 개)은 overflow 필드(그 유물을 주는 고대의 존재)로 다시 나눈다.
       if (fi.length > TEMPLATE_LIMIT && overflow) {
-        const label = `${facetLabel(f, v)} ${cat.name} (${OVERFLOW_KO[overflow] || overflow}별)`;
+        const label = t('section.overflow', { value: facetLabel(f, v), cat: cat.name });
         for (const o of facetValues(fi, overflow)) add([facet(f, v), facet(overflow, o)], fi.filter(i => i[overflow] === o), `${f}-${v}`, label);
       } else {
         add([facet(f, v)], fi, f);
@@ -134,7 +155,7 @@ function makeTemplate(cat, id, parts, items, section) {
     parts,
     section,
     group: parts.find(p => p.facet === 'group') || null,
-    label: parts.length ? parts[parts.length - 1].label : '전체',
+    label: parts.length ? parts[parts.length - 1].label : t('tpl.all'),
     title: [cat.name, ...parts.map(p => p.label)].join(' · '),
     tile: cat.tile,
     items,

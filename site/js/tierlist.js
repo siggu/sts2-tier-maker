@@ -1,5 +1,7 @@
 // 티어 리스트 상태: 저장, 불러오기, 공유 링크 인코딩.
 
+import { t } from './i18n.js';
+
 export const DEFAULT_TIERS = [
   { label: 'S', color: '#e5484d' },
   { label: 'A', color: '#f2884b' },
@@ -16,16 +18,20 @@ export const PALETTE = [
 
 const KEY = id => `sts2tier.v1.${id}`;
 
+// 저장·삭제 알림 (로그인 상태면 community.js 가 서버에 올린다)
+let storageHooks = {};
+export function setStorageHooks(hooks) { storageHooks = hooks || {}; }
+
 export function freshState(template) {
   return {
-    title: `${template.title} 티어`,
+    title: t('tier.defaultTitle', { title: template.title }),
     tiers: DEFAULT_TIERS.map(t => ({ ...t, items: [] })),
     updatedAt: 0,
   };
 }
 
 // 데이터가 바뀌어 사라진 아이템은 걸러 낸다.
-function sanitize(state, template) {
+export function sanitize(state, template) {
   if (!state || !Array.isArray(state.tiers)) return null;
   const seen = new Set();
   const tiers = state.tiers.slice(0, 20).map(t => ({
@@ -39,7 +45,7 @@ function sanitize(state, template) {
   }));
   if (!tiers.length) return null;
   return {
-    title: String(state.title ?? '').slice(0, 80) || `${template.title} 티어`,
+    title: String(state.title ?? '').slice(0, 80) || t('tier.defaultTitle', { title: template.title }),
     tiers,
     updatedAt: state.updatedAt || 0,
   };
@@ -56,10 +62,12 @@ export function loadState(template) {
 export function saveState(template, state) {
   state.updatedAt = Date.now();
   try { localStorage.setItem(KEY(template.id), JSON.stringify(state)); } catch { /* 저장소 없음 */ }
+  storageHooks.save?.(template.id);
 }
 
 export function clearState(template) {
   try { localStorage.removeItem(KEY(template.id)); } catch { /* 저장소 없음 */ }
+  storageHooks.clear?.(template.id);
 }
 
 export function savedSummary(template) {

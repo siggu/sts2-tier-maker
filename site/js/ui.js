@@ -1,7 +1,8 @@
 // 공용 UI 조각: 타일, 툴팁, 토스트, 보드.
 
 import { enableDrag } from './dnd.js';
-import { rarityKo, typeKo } from './data.js';
+import { rarityName, typeName } from './data.js';
+import { t } from './i18n.js';
 
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -66,9 +67,9 @@ export function itemDetails(item) {
   const meta = [
     item.nameEn,
     item.groupName,
-    item.rarity && rarityKo(item.rarity),
-    item.type && typeKo(item.type),
-    item.cost != null && item.cost !== '' && `코스트 ${item.cost}`,
+    item.rarity && rarityName(item.rarity),
+    item.type && typeName(item.type),
+    item.cost != null && item.cost !== '' && t('tip.cost', { n: item.cost === -1 ? 'X' : item.cost }),
   ].filter(Boolean).join(' · ');
   return [
     h('div', { class: 'tip-title' }, item.name),
@@ -79,7 +80,7 @@ export function itemDetails(item) {
 }
 
 export function tipDetails(item) {
-  return [...itemDetails(item), h('div', { class: 'tip-hint' }, '더블클릭하면 자세히 볼 수 있습니다')];
+  return [...itemDetails(item), h('div', { class: 'tip-hint' }, t('tip.hint'))];
 }
 
 export function showTip(anchor, item) {
@@ -117,7 +118,7 @@ export function toast(msg) {
 // rows: [{ label, color, items: [id], sub? }]
 // 줄 index -1 은 아래쪽 미배치 영역(pool).
 
-export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorate, readonly = false, poolTitle = '배치하지 않은 항목' }) {
+export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorate, readonly = false, poolTitle = t('board.pool') }) {
   const root = h('div', { class: `board kind-${template.tile}${readonly ? ' readonly' : ''}` });
   let selected = null;
   const lookup = id => template.byId.get(id);
@@ -131,7 +132,7 @@ export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorat
       label.classList.add('editable');
       label.setAttribute('role', 'button');
       label.setAttribute('tabindex', '0');
-      label.setAttribute('aria-label', `${row.label} 줄 편집`);
+      label.setAttribute('aria-label', t('row.editAria', { label: row.label }));
       label.addEventListener('click', () => onRowMenu(ri, label));
     }
     const items = h('div', { class: 'zone-items' }, row.items.map(id => {
@@ -203,10 +204,10 @@ export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorat
     const item = lookup(id);
     hint.replaceChildren(
       h('div', { class: 'select-hint-body' }, ...itemDetails(item)),
-      h('div', { class: 'select-hint-help' }, '놓을 줄을 누르세요', h('span', { class: 'kbd-only' }, ` · 키보드 1~${rows.length} / 0 = 빼기 / i = 자세히`)),
+      h('div', { class: 'select-hint-help' }, t('select.help'), h('span', { class: 'kbd-only' }, ` · ${t('select.keys', { n: rows.length })}`)),
       h('div', { class: 'select-hint-actions' },
-        onOpen && h('button', { class: 'btn small', onclick: () => { const x = selected; select(null); onOpen(x); } }, '자세히'),
-        h('button', { class: 'btn ghost small', onclick: () => select(null) }, '취소'),
+        onOpen && h('button', { class: 'btn small', onclick: () => { const x = selected; select(null); onOpen(x); } }, t('select.detail')),
+        h('button', { class: 'btn ghost small', onclick: () => select(null) }, t('select.cancel')),
       ),
     );
     hint.hidden = false;
