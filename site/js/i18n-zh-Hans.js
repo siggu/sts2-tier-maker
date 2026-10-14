@@ -1,13 +1,13 @@
 // 简体中文网站文字 (游戏术语依照《杀戮尖塔2》官方简体中文)
 export default {
-  'site.name': '尖塔梯度榜',
-  'meta.title': '尖塔梯度榜 · Slay the Spire 2',
-  'meta.description': '为《杀戮尖塔2》的角色、Boss、卡牌、遗物和药水制作梯度榜，并和大家一起投票：哪些太强，哪些太弱？',
+  'site.name': '尖塔梯度表',
+  'meta.title': '尖塔梯度表 · Slay the Spire 2',
+  'meta.description': '为《杀戮尖塔2》的角色、Boss、卡牌、遗物和药水制作梯度表，并和大家一起投票：哪些太强，哪些太弱？',
   'foot.rights': '本站为非官方粉丝网站。《Slay the Spire 2》及所有卡牌、遗物图片的权利归 <a href="https://www.megacrit.com/" rel="noopener">Mega Crit</a> 所有。',
   'foot.source': '数据来源：<a href="https://slaythespire.wiki.gg/" rel="noopener">Slay the Spire Wiki</a>',
 
-  'mode.tier': '梯度榜制作',
-  'mode.tier.lead': '拖放排列，做出你自己的梯度榜，可保存为图片或通过链接分享。',
+  'mode.tier': '梯度表制作',
+  'mode.tier.lead': '拖放排列，做出你自己的梯度表，可保存为图片或通过链接分享。',
   'mode.balance': '平衡投票',
   'mode.balance.lead': '太强、正好还是太弱？大家的投票会汇总成比例显示。',
 
@@ -92,8 +92,8 @@ export default {
   'hint.balance': '你的调整会先作为草稿保存在本设备上，按下“提交投票”后才会计入大家的结果。',
   'hint.ok': '知道了',
 
-  'tier.defaultTitle': '{title} 梯度榜',
-  'tier.titleAria': '梯度榜标题',
+  'tier.defaultTitle': '{title} 梯度表',
+  'tier.titleAria': '梯度表标题',
   'tier.placed': '已放置 {n} / {total}',
   'tier.savePng': '保存图片',
   'tier.share': '分享链接',
@@ -111,9 +111,9 @@ export default {
   'row.clear': '清空',
   'row.delete': '删除行',
   'row.editAria': '编辑 {label} 行',
-  'shared.banner': '你正在查看别人分享的梯度榜。点击项目可查看详情。',
-  'shared.overwrite': '要用这份内容覆盖你的梯度榜吗？',
-  'shared.import': '导入到我的梯度榜',
+  'shared.banner': '你正在查看别人分享的梯度表。点击项目可查看详情。',
+  'shared.overwrite': '要用这份内容覆盖你的梯度表吗？',
+  'shared.import': '导入到我的梯度表',
   'shared.mine': '查看我的',
   'share.bad': '无法读取分享链接',
   'share.copied': '已复制分享链接',
@@ -121,7 +121,7 @@ export default {
   'png.making': '正在生成图片…',
   'png.saved': '图片已保存',
   'png.failed': '无法生成图片',
-  'png.footer': 'Slay the Spire 2 梯度榜（非官方）',
+  'png.footer': 'Slay the Spire 2 梯度表（非官方）',
 
   'board.pool': '未放置的项目',
   'select.help': '点击要放置的行',

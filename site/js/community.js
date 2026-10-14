@@ -19,6 +19,8 @@ const enc = encodeURIComponent;
 const VERDICT_KEYS = ['nerf', 'fair', 'buff'];
 const LIMITS = { title: 80, comment: 500, nameMin: 2, nameMax: 20, report: 200 };
 const strLen = s => [...s].length;
+// 경로 표시 등에 쓰는 짧은 제목
+const short = (s, n = 24) => { const a = [...String(s || '')]; return a.length > n ? `${a.slice(0, n - 1).join('')}…` : a.join(''); };
 
 // ================================================================ 작은 도구
 
@@ -71,7 +73,8 @@ function avatar(user, cls = '') {
   const name = String(user?.name || '?').trim();
   const initial = ([...name][0] || '?').toUpperCase();
   let hue = 0;
-  for (const ch of String(user?.id || name)) hue = (hue * 31 + ch.charCodeAt(0)) % 360;
+  for (const ch of String(user?.id || name)) hue = (hue * 31 + ch.charCodeAt(0)) % 3600;
+  hue = (hue * 137) % 360; // 비슷한 id 도 색이 멀리 떨어지게
   const fallback = h('span', { class: `acct-av acct-av-init ${cls}`, style: { '--hue': String(hue) }, 'aria-hidden': 'true' }, initial);
   const pic = typeof user?.picture === 'string' && /^https:\/\//.test(user.picture) ? user.picture : null;
   if (!pic) return fallback;
@@ -572,7 +575,7 @@ async function viewPost(postId, ctx) {
   const tpl = db.template(post.template);
   if (!tpl) {
     ctx.render(
-      ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], [post.title]),
+      ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], [short(post.title)]),
       h('section', { class: 'empty' }, h('h2', {}, t('gallery.templateGone')), h('p', {}, h('a', { class: 'btn', href: '#/gallery' }, t('gallery.back')))),
     );
     return;
@@ -678,7 +681,7 @@ async function viewPost(postId, ctx) {
       onCount: n => { post.comments = n; },
     });
     ctx.render(
-      ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], [tpl.title, `#/gallery/${tpl.id}`], [post.title]),
+      ctx.crumbs('tier', [t('gallery.nav'), '#/gallery'], [tpl.title, `#/gallery/${tpl.id}`], [short(post.title)]),
       h('header', { class: 'gal-post-head' },
         h('h1', { class: 'shared-title' }, post.title),
         h('div', { class: 'gal-post-meta' },

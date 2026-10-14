@@ -121,7 +121,7 @@ function bodyFor(item, category, db, showUp = false) {
         ))),
       )),
       item.members.some(m => m.moves.some(mv => mv.text.includes('class="asc"'))) &&
-        h('p', { class: 'detail-note' }, h('span', { class: 'asc' }, t('detail.ascColor')), ' ', t('detail.ascNote')),
+        h('p', { class: 'detail-note' }, h('span', { class: 'asc' }, t('detail.ascColor')), /^(ja|zh)/.test(lang) ? '' : ' ', t('detail.ascNote')),
       lang !== 'en' && item.members.some(m => m.moves.length) &&
         h('p', { class: 'detail-note' }, t('detail.movesEnglish')),
     ];
