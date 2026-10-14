@@ -1,1 +1,357 @@
-/* 사용자 월드컵 (cups 에이전트) */
+/* 사용자 월드컵 (cups.js). style.css 의 토큰(--gold, --panel …), community.css 의 .gal-*·.cmt-*·.acct-*, play.css 의 .vs-*·.cup-* 를 함께 쓴다. */
+
+.cups-center { justify-content: center; }
+
+/* ---------------------------------------------------------------- 게임 월드컵 | 사용자 월드컵 */
+.cups-switch {
+  display: flex; gap: 6px; max-width: 520px; margin: 0 0 18px;
+  padding: 4px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .1); background: rgba(0, 0, 0, .28);
+}
+.cups-switch a {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; padding: 0 10px; border-radius: 9px;
+  color: var(--muted); font-size: 14.5px; font-weight: 700; text-decoration: none; text-align: center;
+}
+.cups-switch a span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cups-switch a:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
+.cups-switch a.on { color: #1a1206; background: linear-gradient(180deg, #f0c76a, #c98f2c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35); }
+.cups-switch-ic { font-size: 15px; line-height: 1; }
+
+/* ---------------------------------------------------------------- 목록 머리 */
+.cups-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 16px; margin-bottom: 14px; }
+.cups-head-text { flex: 1 1 320px; min-width: 0; }
+.cups-head-text p { overflow-wrap: anywhere; }
+.cups-head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cups-head-actions .ic, .cups-add .ic, .cups-add-more .ic, .cups-img-actions .ic, .cups-intro-actions .ic { font-size: 16px; }
+.cups-controls { margin-top: 0; }
+
+/* ---------------------------------------------------------------- 표지 (카드·소개·만들기 공용) */
+.cups-cover {
+  position: relative; display: block;
+  aspect-ratio: 16 / 9; width: 100%; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 100%, rgba(217, 164, 65, .14), transparent 70%),
+    linear-gradient(180deg, #1a1712, #0f0e0b);
+}
+.cups-cover > img, .cups-cell img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fit-cover { object-fit: cover; }
+.fit-contain { object-fit: contain; }
+.cups-cover > img.fit-contain { padding: 6%; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .6)); }
+.cups-mosaic { display: grid; gap: 2px; background: #0b0a08; }
+.cups-mosaic.n2 { grid-template-columns: 1fr 1fr; }
+.cups-mosaic.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.cups-cell {
+  position: relative; min-width: 0; min-height: 0; overflow: hidden;
+  background: radial-gradient(100% 90% at 50% 100%, rgba(217, 164, 65, .12), transparent 70%), #16140f;
+}
+.cups-cell img.fit-contain { padding: 6%; }
+.cups-cover-badge {
+  position: absolute; right: 8px; bottom: 8px; z-index: 1;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(10, 9, 7, .78); border: 1px solid rgba(217, 164, 65, .45);
+  color: var(--gold-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- 목록 카드 */
+.cups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.cups-grid > .empty { grid-column: 1 / -1; }
+.cupc {
+  position: relative; min-width: 0;
+  display: flex; flex-direction: column;
+  border-radius: 14px; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .09);
+  background: var(--panel);
+  color: var(--text); text-decoration: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+  transition: transform .15s ease, border-color .15s ease;
+}
+a.cupc:hover { transform: translateY(-2px); border-color: var(--line-strong); }
+.cupc .cups-cover { border-bottom: 1px solid rgba(217, 164, 65, .25); }
+.cupc.is-hidden { opacity: .7; }
+.cupc-body { display: grid; gap: 4px; padding: 10px 12px 12px; min-width: 0; }
+.cupc-title {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-family: var(--font-title); font-size: 16.5px; line-height: 1.35; color: var(--gold-hi); overflow-wrap: anywhere;
+}
+.cupc-desc {
+  margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+.cupc-author { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+.cupc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.cupc-author time { flex: none; white-space: nowrap; }
+.cupc-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 2px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cupc-stats .gal-stat.on .ic { color: #f58f9c; }
+.cupc-size { padding: 0 7px; border-radius: 999px; background: rgba(255, 255, 255, .06); font-size: 11.5px; }
+.cupc-mine { padding: 0 7px; border-radius: 999px; background: rgba(217, 164, 65, .18); color: var(--gold-hi); font-size: 11.5px; font-weight: 700; }
+.cupc.skeleton { pointer-events: none; }
+.cupc.skeleton .cups-cover { background: rgba(255, 255, 255, .03); }
+
+/* 월드컵 고르기 화면 아래: 인기 사용자 월드컵 띠 */
+.cups-strip-head { display: flex; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.cups-strip-head .block-title { margin: 0; }
+.cups-strip-all { margin-left: auto; color: var(--muted); font-size: 13.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.cups-strip-all:hover { color: var(--gold-hi); }
+.cups-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cups-strip > .cupc:nth-child(n+5) { display: none; }
+.cups-strip-empty {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 64px; padding: 12px 16px; border-radius: 12px;
+  border: 1px dashed var(--line-strong); background: rgba(217, 164, 65, .05);
+  color: var(--gold-hi); font-weight: 600; text-decoration: none; text-align: center;
+}
+.cups-strip-empty:hover { background: rgba(217, 164, 65, .1); }
+.cups-strip-empty .ic { flex: none; font-size: 18px; }
+.cups-strip .cupc-desc { display: none; }
+@media (max-width: 899px) {
+  .cups-strip {
+    grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 220px;
+    overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+    margin: 0 -16px; padding: 0 16px 8px; scroll-padding: 0 16px; scrollbar-width: thin;
+  }
+  .cups-strip > * { scroll-snap-align: start; }
+  .cups-strip > .cupc:nth-child(n+5) { display: flex; }
+}
+
+/* ---------------------------------------------------------------- 만들기·고치기 폼 */
+.cups-draft {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin: 0 0 14px; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(217, 164, 65, .08);
+  color: var(--gold-hi); font-size: 13.5px; font-weight: 600;
+}
+.cups-draft .btn { margin-left: auto; }
+.cups-form { display: grid; gap: 16px; max-width: 860px; }
+.cups-panel {
+  min-width: 0; padding: 16px 18px 18px; border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, .08); background: var(--panel);
+}
+.cups-panel-title {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  margin: 0 0 12px; font-family: var(--font-title); font-size: 19px; color: var(--gold-hi);
+}
+.cups-step {
+  display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: linear-gradient(180deg, #f0c76a, #c48a28); color: #1a1206;
+  font-family: var(--font-ui); font-size: 13px; font-weight: 800;
+}
+.cups-field { display: grid; gap: 6px; margin: 0 0 12px; }
+.cups-field:last-child { margin-bottom: 0; }
+.cups-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cups-field-label { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.cups-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cups-input {
+  width: 100%; min-width: 0; min-height: 40px; padding: 8px 11px;
+  border-radius: 9px; border: 1px solid rgba(255, 255, 255, .16);
+  background: #101217; color: var(--text); font-size: 15px; line-height: 1.4;
+}
+textarea.cups-input { resize: vertical; min-height: 76px; }
+.cups-input:focus { border-color: var(--gold); outline: none; box-shadow: 0 0 0 3px rgba(217, 164, 65, .15); }
+.cups-input[aria-invalid="true"] { border-color: #e5484d; }
+.cups-input::placeholder { color: rgba(163, 154, 134, .7); }
+.cups-help { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.cups-help-sub { margin-top: 4px; color: var(--gold); }
+.cups-items-count {
+  margin-left: auto; padding: 2px 10px; border-radius: 999px;
+  font-family: var(--font-ui); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.cups-items-count.ok { background: rgba(156, 204, 90, .16); color: #b7dd84; }
+.cups-items-count.low { background: rgba(245, 196, 81, .16); color: #f5c451; }
+.cups-items-count.over { background: rgba(229, 72, 77, .2); color: #ffb4b0; }
+
+/* 항목 줄 */
+.cups-rows { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.cups-row {
+  display: grid; grid-template-columns: 22px 56px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 4px; border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .06); background: rgba(0, 0, 0, .22);
+}
+.cups-row.bad { border-color: rgba(229, 72, 77, .6); background: rgba(229, 72, 77, .08); }
+.cups-row-no { text-align: center; color: var(--muted); font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cups-thumb {
+  position: relative; width: 56px; height: 56px; padding: 0; overflow: hidden;
+  border-radius: 8px; border: 1px dashed rgba(217, 164, 65, .45);
+  background: #15130f; color: var(--muted); cursor: pointer;
+}
+.cups-thumb.has-img { border-style: solid; border-color: rgba(217, 164, 65, .6); }
+.cups-thumb:hover, .cups-thumb.drop { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(217, 164, 65, .3); }
+.cups-thumb[disabled] { cursor: progress; }
+.cups-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cups-thumb img.fit-contain { padding: 3px; }
+.cups-thumb-empty { display: grid; place-items: center; width: 100%; height: 100%; font-size: 22px; opacity: .7; }
+.cups-thumb-tag {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 1px 0; background: rgba(0, 0, 0, .72); color: var(--muted);
+  font-size: 9.5px; font-weight: 700; line-height: 1.3; text-align: center;
+}
+.cups-busy {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: rgba(8, 7, 5, .72); color: var(--gold-hi); font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.cups-spin {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid rgba(217, 164, 65, .3); border-top-color: var(--gold);
+  animation: cups-spin .8s linear infinite;
+}
+@keyframes cups-spin { to { transform: rotate(360deg); } }
+.cups-row-name { min-height: 38px; }
+.cups-row-move { display: flex; flex-direction: column; gap: 2px; }
+.cups-icon-btn {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border-radius: 8px; border: 1px solid rgba(255, 255, 255, .12); background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 18px;
+}
+.cups-row-move .cups-icon-btn { height: 18px; border-radius: 5px; font-size: 16px; }
+.cups-icon-btn:hover:not([disabled]) { color: var(--text); border-color: rgba(255, 255, 255, .3); }
+.cups-icon-btn[disabled] { opacity: .3; cursor: default; }
+.cups-row-del:hover:not([disabled]) { color: #ffb4b0; border-color: rgba(229, 72, 77, .5); }
+
+.cups-add { display: flex; gap: 8px; margin-top: 10px; }
+.cups-add .cups-input { flex: 1; }
+.cups-add .btn { flex: none; min-height: 40px; }
+.cups-add-more { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.cups-paste-tip { margin-top: 8px; font-size: 12.5px; }
+.cups-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; clip: rect(0 0 0 0); }
+.cups-img-menu { min-width: 220px; }
+
+/* 표지 고르기 */
+.cups-cover-edit { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.cups-cover-prev { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid rgba(217, 164, 65, .35); }
+.cups-cover-side { display: grid; gap: 10px; min-width: 0; }
+.cups-img-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* 아래쪽: 오류·만들기 */
+.cups-submit-bar {
+  display: grid; gap: 10px; padding: 14px 18px; border-radius: 14px;
+  border: 1px solid var(--line); background: linear-gradient(180deg, rgba(42, 34, 22, .9), rgba(22, 20, 16, .92));
+}
+.cups-submit-bar .actions { justify-content: flex-end; }
+.cups-submit { min-width: 180px; font-size: 15px; }
+.cups-errors:empty { display: none; }
+.cups-errors ul { margin: 0; padding: 10px 12px 10px 28px; border-radius: 9px; background: rgba(229, 72, 77, .12); border: 1px solid rgba(229, 72, 77, .45); color: #ffc4c2; font-size: 13.5px; line-height: 1.55; }
+
+/* 고치기: 바꿀 수 없는 항목 */
+.cups-fixed { margin: 0 0 10px; padding: 10px 12px; border-radius: 9px; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08); font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.cups-fixed-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.cups-fixed-list li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px; border-radius: 8px; background: rgba(0, 0, 0, .22); }
+.cups-fixed-img { position: relative; flex: none; width: 36px; height: 36px; border-radius: 6px; overflow: hidden; background: #15130f; }
+.cups-fixed-img img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cups-fixed-name { min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 로그인 안내 */
+.cups-gate-ic { font-size: 40px; line-height: 1; }
+.cups-gate p { max-width: 520px; margin-left: auto; margin-right: auto; }
+
+/* ---------------------------------------------------------------- 게임 이미지 고르기 창 */
+.acct-modal.cups-gp-modal { width: min(760px, 100%); }
+.cups-gp { display: grid; gap: 10px; min-width: 0; }
+.cups-gp-searchbox {
+  display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  border-radius: 9px; border: 1px solid rgba(255, 255, 255, .16); background: #101217;
+}
+.cups-gp-searchbox:focus-within { border-color: var(--gold); }
+.cups-gp-searchbox .ic { font-size: 18px; color: var(--muted); }
+.cups-gp-search { flex: 1; min-width: 0; min-height: 40px; border: 0; background: transparent; color: var(--text); font-size: 15px; outline: none; }
+.cups-gp-cats { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 2px 6px; scrollbar-width: thin; }
+.cups-gp-cats .vs-chip { cursor: pointer; background: transparent; font: inherit; font-size: 13px; font-weight: 600; }
+.cups-gp-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px;
+  max-height: min(52vh, 460px); overflow-y: auto; overscroll-behavior: contain; padding: 2px;
+}
+.cups-gp-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0;
+  padding: 6px 4px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(0, 0, 0, .25); color: var(--text); cursor: pointer; font: inherit;
+}
+.cups-gp-item:hover, .cups-gp-item:focus-visible { border-color: var(--gold); background: rgba(217, 164, 65, .1); }
+.cups-gp-img { position: relative; width: 100%; height: 76px; }
+.cups-gp-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
+.cups-gp-name { width: 100%; font-size: 11.5px; line-height: 1.25; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cups-gp-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+/* ---------------------------------------------------------------- 월드컵 하나: 소개 */
+.cups-intro {
+  display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 18px; align-items: start;
+  margin: 0 0 16px;
+}
+.cups-intro-cover { border-radius: 14px; border: 1px solid rgba(217, 164, 65, .4); box-shadow: 0 10px 28px rgba(0, 0, 0, .4); }
+.cups-intro-main { min-width: 0; display: grid; gap: 8px; }
+.cups-intro-title { margin: 0; font-family: var(--font-title); font-size: clamp(23px, 3.4vw, 32px); line-height: 1.25; color: var(--gold-hi); overflow-wrap: anywhere; }
+.cups-intro-desc { margin: 0; font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; color: var(--text); }
+.cups-intro-meta { margin: 0; }
+.cups-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.cups-stats > span { display: inline-flex; align-items: center; gap: 5px; }
+.cups-stats .ic { font-size: 15px; color: var(--gold); opacity: .85; }
+.cups-intro-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.cups-like {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 34px; padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px;
+  background: rgba(0, 0, 0, .3); color: var(--text);
+  font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.cups-like .ic { font-size: 17px; color: var(--muted); }
+.cups-like b { font-variant-numeric: tabular-nums; }
+.cups-like:hover { border-color: #f58f9c; }
+.cups-like.on { border-color: #f58f9c; background: rgba(245, 143, 156, .14); color: #ffd0d6; }
+.cups-like.on .ic { color: #f58f9c; }
+.cups-tabs button { padding: 7px 18px; }
+
+/* 대결 판: 사용자 그림(정사각에 가까움) */
+.vs-pair.kind-custom .vs-media, .cup-champ-card.kind-custom .vs-media { height: auto; aspect-ratio: 1 / 1; max-height: clamp(220px, 46vh, 360px); }
+.vs-pair.kind-custom .vs-media img, .cup-champ-card.kind-custom .vs-media img {
+  width: 100%; height: 100%; object-fit: contain; border-radius: 10px;
+}
+.vs-pair.kind-custom .vs-name { font-family: var(--font-title); }
+.cups-mini { position: relative; background: #15130f; }
+.cups-mini img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+/* 순위 */
+.cups-rank-img { position: relative; flex: none; width: 48px; height: 48px; border-radius: 8px; overflow: hidden; background: #15130f; border: 1px solid rgba(255, 255, 255, .08); }
+.cups-rank-img img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cups-rank-row { cursor: default; }
+.cups-rank-row:hover { border-color: rgba(255, 255, 255, .07); }
+.cups-rank-empty { padding: 40px 0; }
+
+/* ---------------------------------------------------------------- 좁은 화면 */
+@media (max-width: 760px) {
+  .cups-intro { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .cups-cover-edit { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .cups-switch { max-width: none; }
+  .cups-switch a { font-size: 13.5px; padding: 0 6px; }
+  .cups-head-actions { width: 100%; }
+  .cups-head-actions .btn { flex: 1 1 auto; }
+  .cups-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .cupc-body { padding: 8px 10px 10px; }
+  .cupc-title { font-size: 14.5px; }
+  .cupc-desc { display: none; }
+  .cupc-stats { gap: 2px 9px; }
+  .cupc-size { display: none; }
+  .cups-cover-badge { right: 5px; bottom: 5px; font-size: 11px; padding: 1px 6px; }
+  .cups-strip { margin: 0 -12px; padding: 0 12px 8px; scroll-padding: 0 12px; grid-auto-columns: 196px; }
+  .cups-panel { padding: 14px 12px 14px; }
+  .cups-panel-title { font-size: 17.5px; }
+  .cups-row { grid-template-columns: 52px minmax(0, 1fr) auto auto; gap: 6px; padding: 5px 6px 5px 5px; }
+  .cups-row-no { display: none; }
+  .cups-thumb { width: 52px; height: 52px; }
+  .cups-icon-btn { width: 30px; }
+  .cups-submit-bar { padding: 12px; }
+  .cups-submit-bar .actions .btn { flex: 1 1 auto; }
+  .cups-gp-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); max-height: 50vh; }
+  .cups-gp-img { height: 64px; }
+  .cups-intro-actions .btn, .cups-like { flex: 1 1 auto; justify-content: center; }
+  .cups-intro-actions .btn.danger, .cups-intro-actions .btn.ghost { flex: 0 1 auto; }
+  .vs-pair.kind-custom .vs-media { max-height: none; }
+  .cup-champ-card.kind-custom .vs-media { max-height: 300px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cupc { transition: none; }
+  .cups-spin { animation-duration: 2s; }
+}

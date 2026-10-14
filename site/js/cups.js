@@ -14,7 +14,8 @@ import { mountWorldCup, sizesFor } from './worldcup.js';
 import { icon, avatar, timeEl, commentsSection, reportDialog } from './community.js';
 
 const enc = encodeURIComponent;
-const LIMITS = { titleMin: 2, title: 60, desc: 300, name: 80, itemsMin: 4, items: 64, bytes: 300 * 1024, px: 512 };
+// bytes: 서버 한도, target: 저장 공간(D1)을 아끼려고 되도록 맞추는 크기
+const LIMITS = { titleMin: 2, title: 60, desc: 300, name: 80, itemsMin: 4, items: 64, bytes: 300 * 1024, target: 100 * 1024, px: 512 };
 const strLen = s => [...String(s ?? '')].length;
 const short = (s, n = 24) => { const a = [...String(s || '')]; return a.length > n ? `${a.slice(0, n - 1).join('')}…` : a.join(''); };
 const num = v => Math.max(0, Number(v) || 0);
@@ -308,7 +309,8 @@ async function decodeImage(file) {
   }
 }
 
-// 긴 쪽 512px 이하, webp(안 되면 jpeg), 300KB 이하가 될 때까지 품질·크기를 줄인다.
+// 긴 쪽 512px 이하, webp(안 되면 jpeg). 100KB 이하가 될 때까지 품질·크기를 줄이고,
+// 끝내 못 맞추면 300KB(서버 한도) 이하인 것 중 가장 작은 것.
 async function shrinkImage(file) {
   if (!file || !/^image\//.test(file.type || 'image/')) throw Object.assign(new Error('type'), { code: 'img_type' });
   let src;
@@ -316,7 +318,8 @@ async function shrinkImage(file) {
   const W = src.width || src.naturalWidth, H = src.height || src.naturalHeight;
   if (!W || !H) throw Object.assign(new Error('decode'), { code: 'img_decode' });
   let scale = Math.min(1, LIMITS.px / Math.max(W, H));
-  for (let attempt = 0; attempt < 6; attempt++) {
+  let best = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
     const w = Math.max(1, Math.round(W * scale)), hh = Math.max(1, Math.round(H * scale));
     const c = document.createElement('canvas');
     c.width = w; c.height = hh;
@@ -335,11 +338,14 @@ async function shrinkImage(file) {
         jg.drawImage(c, 0, 0);
         blob = await canvasBlob(j, 'image/jpeg', q);
       }
-      if (blob && blob.size <= LIMITS.bytes) { src.close?.(); return blob; }
+      if (!blob) continue;
+      if (blob.size <= LIMITS.target) { src.close?.(); return blob; }
+      if (blob.size <= LIMITS.bytes && (!best || blob.size < best.size)) best = blob;
     }
-    scale *= 0.75;
+    scale *= 0.8;
   }
   src.close?.();
+  if (best) return best;
   throw Object.assign(new Error('too_big'), { status: 413, code: 'too_big' });
 }
 
@@ -372,7 +378,7 @@ async function uploadFile(file, onProgress) {
 function uploadErrorText(err) {
   if (err?.code === 'img_type' || err?.code === 'img_decode') return t('cups.img.unreadable');
   if (err?.status === 413 || err?.code === 'too_big') return t('cups.img.tooBig');
-  if (err?.status === 415) return t('cups.img.unreadable');
+  if (err?.status === 415 || (err?.status === 400 && (err.reason === 'type' || err.reason === 'image'))) return t('cups.img.unreadable');
   if (err?.status === 429 && err.reason === 'daily') return t('cups.img.daily');
   return errorText(err);
 }
@@ -947,26 +953,27 @@ function viewNew(ctx) {
     const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     if (lines.length < 2) return;
     e.preventDefault();
-    const at = row ? st.items.indexOf(row) : -1;
     const total = lines.length;
+    const blank = r => !r.name.trim() && !r.img && r.busy == null;
     let placed = 0;
-    if (row && !row.name.trim() && !row.img) { row.name = lines.shift().slice(0, LIMITS.name); placed++; }
-    const room = LIMITS.items - st.items.filter(r => r.name.trim() || r.img).length;
-    // 비어 있는 줄(이름·그림 없음)부터 채운다
-    const blanks = st.items.filter(r => r !== row && !r.name.trim() && !r.img);
+    // 붙여 넣은 줄 다음부터 차례로: 빈 줄이면 채우고, 아니면 그 자리에 새 줄을 끼운다 (순서 유지)
+    let pos = row ? st.items.indexOf(row) : st.items.findIndex(blank);
+    if (pos < 0) pos = st.items.length;
+    if (row) {
+      if (blank(row)) { row.name = lines.shift().slice(0, LIMITS.name); placed++; }
+      pos++;
+    }
+    const room = LIMITS.items - st.items.filter(r => !blank(r)).length;
     const take = lines.slice(0, Math.max(0, room));
-    const fresh = [];
     for (const line of take) {
       const name = line.slice(0, LIMITS.name);
-      const blank = blanks.shift();
-      if (blank) blank.name = name;
-      else fresh.push(newRow(name));
+      if (pos < st.items.length && blank(st.items[pos])) st.items[pos].name = name;
+      else st.items.splice(pos, 0, newRow(name));
+      pos++;
     }
-    if (at < 0) st.items.push(...fresh);
-    else st.items.splice(at + 1, 0, ...fresh);
     // 넘치는 빈 줄은 정리
     while (st.items.length > LIMITS.items) {
-      const idx = st.items.findIndex(r => !r.name.trim() && !r.img);
+      const idx = st.items.findLastIndex(blank);
       if (idx < 0) break;
       st.items.splice(idx, 1);
     }
@@ -1107,13 +1114,13 @@ function viewNew(ctx) {
         cover: st.cover || null,
         items: filled().map(r => ({ name: r.name.trim().replace(/\s+/g, ' '), img: r.img || null })),
       };
-      const res = await api('/cups', { method: 'POST', body });
+      const res = await postCup(body);
       const id = res?.cup?.id;
       writeJson(DRAFT_KEY, null);
       toast(t('cups.new.done'));
       location.hash = id ? `#/cup/${enc(id)}` : listHref({ author: currentUser()?.id, sort: 'new' });
     } catch (err) {
-      toast(err?.status === 429 && err.reason === 'daily' ? t('cups.err.daily') : errorText(err));
+      toast(createErrorText(err));
       submitting = false;
       submitBtn.disabled = false;
       submitBtn.textContent = t('cups.new.submit');
@@ -1173,6 +1180,36 @@ function viewNew(ctx) {
   );
   drawRows();
   changed();
+}
+
+// POST /cups. auth.js 의 api() 와 같되, 항목 오류의 index 를 오류에 남긴다.
+async function postCup(body) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/cups`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) });
+  } catch {
+    throw Object.assign(new Error('network'), { status: 0, code: 'network' });
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* 본문 없음 */ }
+  if (res.status === 401) dropSession();
+  if (!res.ok) throw Object.assign(new Error(data?.error || 'http'), { status: res.status, code: data?.error || `http_${res.status}`, reason: data?.reason, index: data?.index });
+  return data;
+}
+
+// POST /cups 오류 → 문구. 항목 오류는 index(0부터)로 몇 번째인지 알려 준다.
+function createErrorText(err) {
+  if (err?.status === 429 && err.reason === 'daily') return t('cups.err.daily');
+  if (err?.status === 400) {
+    const n = Number.isInteger(err.index) ? err.index + 1 : null;
+    if (err.reason === 'title') return t('cups.err.title', { min: LIMITS.titleMin, max: LIMITS.title });
+    if (err.reason === 'description') return t('cups.err.desc', { max: LIMITS.desc });
+    if (err.reason === 'cover') return t('cups.err.badCover');
+    if (err.reason === 'items') return t('cups.err.few', { min: LIMITS.itemsMin, n: '?' });
+    if (n && err.reason === 'img') return t('cups.err.badImg', { n });
+    if (n && (err.reason === 'name' || err.reason === 'item')) return t('cups.err.badName', { n });
+  }
+  return errorText(err);
 }
 
 const fileLabel = f => String(f?.name || '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ').trim().slice(0, LIMITS.name) || t('cups.item.untitled');
