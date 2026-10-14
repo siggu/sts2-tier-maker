@@ -598,7 +598,12 @@ body.modal-open { overflow: hidden; }
 .tpl-card-body { padding: 10px 12px 12px; display: grid; gap: 4px; }
 .tpl-card strong { font-size: 15px; line-height: 1.35; }
 .tpl-card-meta { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tpl-card.started { border-color: rgba(217, 164, 65, .35); }
+.tpl-card.is-progress { border-color: rgba(217, 164, 65, .35); }
+.tpl-card.is-submit { border-color: rgba(245, 196, 81, .6); }
+.tpl-card.is-submit .tpl-card-meta { color: #f5c451; font-weight: 600; }
+.tpl-card.is-done .tpl-card-meta { color: #9ccc5a; font-weight: 600; }
+.cat-card-meta .badge-done { background: rgba(156, 204, 90, .14); color: #b7dd84; }
+.cat-card-meta .badge-submit { background: rgba(245, 196, 81, .2); color: #f5c451; }
 
 .pbar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
 .pbar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c48a28, #f0c76a); }

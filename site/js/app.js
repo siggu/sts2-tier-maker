@@ -131,16 +131,28 @@ function viewHome(mode) {
   const m = MODES[mode];
 
   // 이어서 하기: 진행 중인 묶음 (최근 것 먼저)
+  // 이어서 하기: 아직 덜 끝났거나 제출하지 않은 변경이 있는 묶음만.
+  // 밸런스 투표는 같은 종류의 묶음끼리 표를 공유하므로 종류마다 마지막으로 작업한 묶음 하나만 보인다.
   const started = db.templates
     .map(t => ({ t, s: summaryFor(mode, t) }))
-    .filter(x => x.s)
+    .filter(x => x.s && templateStatus(x.t, x.s) !== 'done')
+    .filter((x, i, all) => {
+      if (mode !== 'balance') return true;
+      const last = lastBalanceTemplate(x.t.category.id);
+      const same = all.filter(y => y.t.category.id === x.t.category.id);
+      return same.some(y => y.t.id === last) ? x.t.id === last : same[0] === x;
+    })
     .sort((a, b) => (b.s.updatedAt || 0) - (a.s.updatedAt || 0) || b.s.placed - a.s.placed)
     .slice(0, 6);
 
   const catCards = db.categories.map(cat => {
     const templates = db.templates.filter(t => t.category.id === cat.id);
     const href = templates.length === 1 ? m.href(templates[0]) : m.cat(cat);
-    const doneCount = templates.filter(t => summaryFor(mode, t)).length;
+    const counts = { progress: 0, submit: 0, done: 0 };
+    for (const t of templates) {
+      const st = templateStatus(t, summaryFor(mode, t));
+      if (st) counts[st]++;
+    }
     return h('a', { class: 'cat-card', href },
       thumbs(cat.items, cat.tile, 4),
       h('div', { class: 'cat-card-body' },
@@ -149,7 +161,9 @@ function viewHome(mode) {
         h('div', { class: 'cat-card-meta' },
           h('span', {}, `${cat.items.length}개`),
           templates.length > 1 && h('span', {}, `묶음 ${templates.length}개`),
-          doneCount > 0 && h('span', { class: 'badge-on' }, `진행 중 ${doneCount}`),
+          counts.submit > 0 && h('span', { class: 'badge-submit' }, `제출 필요 ${counts.submit}`),
+          counts.progress > 0 && h('span', { class: 'badge-on' }, `진행 중 ${counts.progress}`),
+          counts.done > 0 && h('span', { class: 'badge-done' }, `✓ 완료 ${counts.done}`),
         ),
       ),
     );
@@ -174,12 +188,19 @@ function viewHome(mode) {
 
 function templateCard(mode, t, summary = summaryFor(mode, t), showCategory = false) {
   const m = MODES[mode];
-  return h('a', { class: `tpl-card${summary ? ' started' : ''}`, href: m.href(t), style: t.group?.color ? { '--accent': t.group.color } : null },
+  const status = templateStatus(t, summary);
+  const meta = {
+    null: `${t.items.length}개`,
+    progress: `${summary?.placed} / ${t.items.length}`,
+    submit: `${summary?.placed} / ${t.items.length} · 제출 필요`,
+    done: mode === 'tier' ? `✓ 완료 · ${t.items.length}개` : `✓ 제출 완료 · ${t.items.length}개`,
+  }[status];
+  return h('a', { class: `tpl-card${status ? ` is-${status}` : ''}`, href: m.href(t), style: t.group?.color ? { '--accent': t.group.color } : null },
     thumbs(t.items, t.tile, 4),
     h('div', { class: 'tpl-card-body' },
       h('strong', {}, showCategory ? t.title : (t.parts.length ? t.label : '전체')),
-      h('span', { class: 'tpl-card-meta' }, summary ? `${summary.placed} / ${t.items.length}` : `${t.items.length}개`),
-      summary && progressBar(summary.placed, t.items.length),
+      h('span', { class: 'tpl-card-meta' }, meta),
+      (status === 'progress' || status === 'submit') && progressBar(summary.placed, t.items.length),
     ),
   );
 }
@@ -248,10 +269,26 @@ function usageHint(mode) {
   return el;
 }
 
+const LAST_KEY = cat => `sts2bal.last.${cat}`;
+function lastBalanceTemplate(catId) {
+  try { return localStorage.getItem(LAST_KEY(catId)); } catch { return null; }
+}
+function rememberBalanceTemplate(template) {
+  try { localStorage.setItem(LAST_KEY(template.category.id), template.id); } catch { /* 저장소 없음 */ }
+}
+
 function balanceSummary(template) {
   const mine = loadMine(template.category.id);
   const placed = Object.values(mine).flat().filter(id => template.byId.has(id)).length;
-  return placed ? { placed } : null;
+  const unsubmitted = unsubmittedChanges(template.category.id, mine, template.items.map(i => i.id)).length;
+  return placed || unsubmitted ? { placed, unsubmitted } : null;
+}
+
+// 묶음 상태: null(시작 안 함) | 'progress'(진행 중) | 'submit'(제출 필요) | 'done'(완료)
+function templateStatus(t, summary) {
+  if (!summary) return null;
+  if (summary.unsubmitted) return 'submit';
+  return summary.placed >= t.items.length ? 'done' : 'progress';
 }
 
 // ---------------------------------------------------------------- 티어 메이커
@@ -448,6 +485,7 @@ function viewBalance(templateId) {
   if (!template) return notFound();
   const catId = template.category.id;
   const VERDICTS = verdictsFor(catId);
+  rememberBalanceTemplate(template);
   let mine = loadMine(catId);
   const filter = {};
   let syncText = '';
