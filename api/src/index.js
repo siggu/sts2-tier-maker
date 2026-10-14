@@ -1,5 +1,9 @@
 import keys from '../../site/data/keys.json';
 import { makeValidator, VOTE_VALUES } from './votes.js';
+import { corsHeaders, json, sha256 } from './http.js';
+import { getUser } from './auth.js';
+import { handleAccount } from './account.js';
+import { handlePlay } from './play.js';
 
 const MAX_VOTERS_PER_IP_ITEM = 3; // 같은 IP 에서 한 아이템에 표를 무한히 늘리지 못하게
 const RATE_PER_MINUTE = 30;
@@ -17,6 +21,10 @@ export default {
       if (url.pathname === '/health') return json({ ok: true, items: validKeys.size }, 200, cors);
       if (url.pathname === '/balance' && request.method === 'POST') return await postVotes(request, env, ctx, cors);
       if (url.pathname === '/balance' && request.method === 'GET') return await getResults(url, env, ctx, cors);
+      // 로그인·동기화·갤러리·댓글 (account.js), 모두의 티어표·A vs B (play.js). 처리하지 않으면 null.
+      const res = (await handleAccount(request, env, ctx, { url, cors, keys: validKeys }))
+        ?? (await handlePlay(request, env, ctx, { url, cors, keys: validKeys }));
+      if (res) return res;
       return json({ error: 'not_found' }, 404, cors);
     } catch (err) {
       console.error(err);
@@ -24,31 +32,6 @@ export default {
     }
   },
 };
-
-function corsHeaders(request, env) {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
-  };
-  if (allowed.includes(origin)) headers['Access-Control-Allow-Origin'] = origin;
-  return headers;
-}
-
-function json(body, status = 200, headers = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers },
-  });
-}
-
-async function sha256(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
-}
 
 async function postVotes(request, env, ctx, cors) {
   let body;

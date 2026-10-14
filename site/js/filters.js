@@ -1,7 +1,8 @@
 // 미배치 영역 필터: 검색어, 그룹(캐릭터), 희귀도, 종류.
 
 import { h } from './ui.js';
-import { rarityKo, typeKo } from './data.js';
+import { rarityName, typeName, groupLabel } from './data.js';
+import { t } from './i18n.js';
 
 const RARITY_ORDER = ['basic', 'starter', 'common', 'uncommon', 'rare', 'shop', 'event', 'ancient', 'special', 'boss', 'status', 'curse'];
 
@@ -26,13 +27,13 @@ export function poolControls(template, filter, onChange) {
 
   return h('div', { class: 'filters' },
     h('input', {
-      type: 'search', class: 'filter-search', placeholder: '이름 검색', value: filter.q || '',
-      'aria-label': '이름 검색',
+      type: 'search', class: 'filter-search', placeholder: t('filter.search'), value: filter.q || '',
+      'aria-label': t('filter.search'),
       oninput: e => { filter.q = e.target.value; onChange(); },
     }),
-    select('group', template.category.groupLabel || '캐릭터', groups.map(g => [g.id, g.name])),
-    select('rarity', '희귀도', rarities.map(r => [r, rarityKo(r)])),
-    select('type', '종류', types.map(t => [t, typeKo(t)])),
+    select('group', groupLabel(template.category), groups.map(g => [g.id, g.name])),
+    select('rarity', t('facet.rarity'), rarities.map(r => [r, rarityName(r)])),
+    select('type', t('facet.type'), types.map(v => [v, typeName(v)])),
   );
 }
 

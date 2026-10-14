@@ -17,60 +17,87 @@ const UA = 'sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)';
 const WITH_IMAGES = !process.argv.includes('--no-images');
 
 const CHARACTERS = [
-  { id: 'ironclad', en: 'Ironclad', name: '아이언클래드', color: '#c8463c' },
-  { id: 'silent', en: 'Silent', name: '사일런트', color: '#4f9a52' },
-  { id: 'regent', en: 'Regent', name: '리젠트', color: '#d08a2e' },
-  { id: 'necrobinder', en: 'Necrobinder', name: '네크로바인더', color: '#b05aa8' },
-  { id: 'defect', en: 'Defect', name: '디펙트', color: '#4a86c8' },
+  { id: 'ironclad', en: 'Ironclad', color: '#c8463c' },
+  { id: 'silent', en: 'Silent', color: '#4f9a52' },
+  { id: 'regent', en: 'Regent', color: '#d08a2e' },
+  { id: 'necrobinder', en: 'Necrobinder', color: '#b05aa8' },
+  { id: 'defect', en: 'Defect', color: '#4a86c8' },
 ];
-const SHARED_GROUP = { id: 'shared', name: '공용', color: '#9a9a9a' };
+const SHARED_GROUP = { id: 'shared', name: 'Shared', color: '#9a9a9a' };
 const charByEn = new Map(CHARACTERS.map(c => [c.en, c]));
+const charGroups = () => CHARACTERS.map(({ id, en, color }) => ({ id, name: en, color }));
 
-// ---------------------------------------------------------------- 한국어 (게임 공식 번역)
-// tools/l10n/ko.json 은 게임 언어 파일에서 tools/build-l10n.mjs 로 뽑아 만든다.
-// 이름은 공식 한국어로 바꾸고, 효과는 영어 틀로 위키 문구의 수치를 읽어 한국어 틀에 채운다.
-// 맞추지 못한 효과는 영어 그대로 두고 textEn 으로 표시한다.
-let KO = null;
-try { KO = JSON.parse(await readFile(join(ROOT, 'tools', 'l10n', 'ko.json'), 'utf8')); } catch { /* 한국어 파일 없음 → 영어 */ }
+// ---------------------------------------------------------------- 다른 언어 (게임 공식 번역)
+// sts2.json 은 영어(위키)로 두고, 언어마다 site/data/i18n/<언어>.json 에 이름·효과 번역을 따로 둔다.
+// tools/l10n/<언어>.json 은 게임 언어 파일에서 tools/build-l10n.mjs 로 뽑아 만든다.
+// 이름은 공식 번역으로 바꾸고, 효과는 영어 틀로 위키 문구의 수치를 읽어 그 언어 틀에 채운다.
+// 맞추지 못한 효과는 넣지 않는다 (사이트가 영어 효과를 보여 준다).
+export const LANGS = ['ko', 'ja', 'zh-Hans', 'zh-Hant'];
+const L10N = {};
+for (const lang of LANGS) {
+  try { L10N[lang] = JSON.parse(await readFile(join(ROOT, 'tools', 'l10n', `${lang}.json`), 'utf8')); } catch { /* 이 언어 파일 없음 */ }
+}
+const ACTIVE = Object.keys(L10N);
 const lc = s => String(s).trim().toLowerCase();
-const koOf = (table, en) => KO?.[table]?.[lc(en)];
-const koName = (table, en) => { const v = koOf(table, en); return typeof v === 'string' ? v : v?.name; };
-// 효과 문구 속 이름 값(예: 인챈트 이름)을 옮길 때 쓰는 영어 → 한국어 표
-const WORDS = KO ? Object.fromEntries(['cards', 'relics', 'potions', 'enchantments']
-  .flatMap(t => Object.entries(KO[t] || {}).map(([en, v]) => [en, v.name]))) : {};
-const l10nStats = { total: 0, name: 0, text: 0 };
+const entryOf = (lang, table, en) => L10N[lang]?.[table]?.[lc(en)];
+const nameOf = (lang, table, en) => { const v = entryOf(lang, table, en); return typeof v === 'string' ? v : v?.name; };
+// 효과 문구 속 이름 값(예: 인챈트 이름)을 옮길 때 쓰는 영어 → 번역 표
+const WORDS = Object.fromEntries(ACTIVE.map(lang => [lang, Object.fromEntries(['cards', 'relics', 'potions', 'enchantments']
+  .flatMap(t => Object.entries(L10N[lang][t] || {}).map(([en, v]) => [en, v.name])))]));
+const stats = Object.fromEntries(ACTIVE.map(lang => [lang, { total: 0, name: 0, text: 0 }]));
+// 게임에 따로 없는 묶음 이름
+const SHARED_NAMES = {
+  en: { shared: 'Shared', colorless: 'Colorless' },
+  ko: { shared: '공용', colorless: '무색' },
+  ja: { shared: '共通', colorless: '無色' },
+  'zh-Hans': { shared: '通用', colorless: '无色' },
+  'zh-Hant': { shared: '通用', colorless: '無色' },
+};
+const APPEARS = { en: 'Appears: ', ko: '등장: ', ja: '登場: ', 'zh-Hans': '出现：', 'zh-Hant': '出現：' };
+const LIST_SEP = { en: ', ', ko: ', ', ja: '、', 'zh-Hans': '、', 'zh-Hant': '、' };
+const actLabel = (lang, n) => (lang === 'en' ? `Act ${n}` : (L10N[lang]?.terms?.actNumber || 'Act {actNumber}').replace('{actNumber}', n));
 
-function localize(table, enName, wikiText, { keywords = false, upgradable = false } = {}) {
-  l10nStats.total++;
-  const e = koOf(table, enName);
+// 언어별 덮어쓰기: OVERLAY[언어] = { items: { '카테고리/id': { name, text, ... } }, groups: { 카테고리: { 그룹id: 이름 } }, labels }
+const OVERLAY = Object.fromEntries(ACTIVE.map(lang => [lang, { items: {}, groups: {}, labels: {} }]));
+function put(lang, key, patch) {
+  const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  if (Object.keys(clean).length) Object.assign(OVERLAY[lang].items[key] ||= {}, clean);
+}
+function putGroups(catId, groups, nameFor) {
+  for (const lang of ACTIVE) {
+    const names = Object.fromEntries(groups.map(g => [g.id, nameFor(lang, g)]).filter(([, n]) => n));
+    if (Object.keys(names).length) OVERLAY[lang].groups[catId] = names;
+  }
+}
+
+function localize(lang, table, enName, wikiText, { keywords = false, upgradable = false } = {}) {
+  stats[lang].total++;
+  const e = entryOf(lang, table, enName);
   if (!e) return null;
-  l10nStats.name++;
-  const out = { name: e.name, nameEn: enName };
-  if (e.en && e.ko && wikiText) {
+  stats[lang].name++;
+  const out = { name: e.name };
+  if (e.en && e.tr && wikiText) {
     const split = keywords ? splitKeywords(wikiText) : { text: wikiText, keywords: [] };
     const vals = alignValues(e.en, split.text);
     if (vals) {
       try {
-        const r = renderKoBoth(e.ko, vals, WORDS);
+        const r = renderKoBoth(e.tr, vals, WORDS[lang]);
         const kw = split.keywords;
-        out.text = withKeywords(r.text, kw, KO.keywords, false, false);
+        const kwNames = L10N[lang].keywords;
+        out.text = withKeywords(r.text, kw, kwNames, false, false);
         if (upgradable && (r.textUp || kw.some(k => k.base !== k.up))) {
-          out.textUp = withKeywords(r.textUp || r.text, kw, KO.keywords, true, true);
+          out.textUp = withKeywords(r.textUp || r.text, kw, kwNames, true, true);
         }
-        l10nStats.text++;
+        stats[lang].text++;
       } catch { /* 값이 모자라면 영어 효과 유지 */ }
     }
   }
   return out;
 }
 
-// 한국어를 아이템에 덮어쓴다. 효과를 맞추지 못했으면 영어 효과를 두고 textEn 표시.
-function applyKo(item, ko) {
-  if (!ko) return item;
-  item.name = ko.name;
-  item.nameEn = ko.nameEn;
-  if (ko.text) { item.text = ko.text; item.textUp = ko.textUp; } else if (item.text) item.textEn = true;
-  return item;
+// 효과가 있는 아이템(카드·유물·포션·인챈트)의 번역을 모든 언어에 등록한다.
+function translate(key, table, enName, wikiText, opts, extra) {
+  for (const lang of ACTIVE) put(lang, key, { ...localize(lang, table, enName, wikiText, opts), ...extra?.(lang) });
 }
 
 // ---------------------------------------------------------------- 가져오기
@@ -151,7 +178,7 @@ export function formatText(raw, mode = 'both') {
 export function formatEnemyText(raw) {
   if (!raw) return '';
   let s = escapeHtml(String(raw).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''));
-  s = s.replace(/\{\{Asc2?\|(\d+)\|([^{}]*)\}\}/g, '<span class="asc" title="승천 $1 이상">$2</span>');
+  s = s.replace(/\{\{Asc2?\|(\d+)\|([^{}]*)\}\}/g, '<span class="asc" data-asc="$1">$2</span>');
   s = s.replace(/\{\{(?:BD2|KW2|BD|KW)\|([^{}|]*)\}\}/g, '<b>$1</b>');
   s = s.replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1').replace(/\{\{([^{}|]*)\}\}/g, '$1');
   s = s.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1').replace(/'''?/g, '');
@@ -290,11 +317,13 @@ async function cards() {
       items.push(cardItem(name, c, id, ch ? ch.id : SHARED_GROUP.id));
     }
   }
+  const groups = [...charGroups(), { ...SHARED_GROUP, name: 'Colorless' }];
+  putGroups('cards', groups, (lang, g) => (g.id === SHARED_GROUP.id ? SHARED_NAMES[lang].colorless : nameOf(lang, 'characters', g.name)));
   return {
-    id: 'cards', name: '카드', tile: 'card', groupLabel: '캐릭터',
+    id: 'cards', name: 'Cards', tile: 'card', groupKind: 'character',
     // 희귀도는 섞여 있어 의미가 덜하므로 캐릭터 × 종류(공격·스킬·파워)로 나눈다.
     split: { by: ['type'], groupFirst: true },
-    groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), { ...SHARED_GROUP, name: '무색' }],
+    groups,
     items,
   };
 }
@@ -305,7 +334,8 @@ function cardItem(name, c, id, group) {
   const changed = hasUpgrade(c.Text);
   const costUp = c.CostPlus ?? undefined;
   const nameEn = name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, '');
-  return applyKo({
+  translate(`cards/${id}`, 'cards', nameEn, c.Text, { keywords: true, upgradable });
+  return {
     id,
     name: nameEn,
     group,
@@ -318,7 +348,7 @@ function cardItem(name, c, id, group) {
     textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
     img: image(c.Image, 'cards', id, { height: 300 }),
     imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300 }) : undefined,
-  }, localize('cards', nameEn, c.Text, { keywords: true, upgradable }));
+  };
 }
 
 async function curses() {
@@ -327,12 +357,10 @@ async function curses() {
     .filter(([, c]) => c.Rarity === 'Curse' && !c.Multiplayer)
     .map(([name, c]) => {
       const id = slug(name);
-      return applyKo(
-        { id, name, cost: c.Cost ?? undefined, text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) },
-        localize('cards', name, c.Text, { keywords: true }),
-      );
+      translate(`curses/${id}`, 'cards', name, c.Text, { keywords: true });
+      return { id, name, cost: c.Cost ?? undefined, text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) };
     });
-  return { id: 'curses', name: '저주', tile: 'card', items };
+  return { id: 'curses', name: 'Curses', tile: 'card', items };
 }
 
 const RELIC_RARITIES = ['Starter', 'Common', 'Uncommon', 'Rare', 'Shop', 'Event', 'Ancient'];
@@ -343,27 +371,33 @@ async function relics() {
   for (const [name, r] of Object.entries(data)) {
     if (!RELIC_RARITIES.includes(r.Rarity)) continue;
     const ch = charByEn.get(r.Character);
-    const id = slug(name);
-    const koFlavor = koOf('relics', name)?.flavor;
-    items.push(applyKo({
+    // 이벤트의 가짜 유물('Anchor???')은 진짜 유물과 주소가 겹치지 않게 따로 둔다.
+    const id = slug(name) + (/\?{2,}$/.test(name) ? '-fake' : '');
+    translate(`relics/${id}`, 'relics', name, r.Description, {}, lang => {
+      const flavor = entryOf(lang, 'relics', name)?.flavor;
+      return { flavor: flavor ? escapeHtml(flavor.replace(/\[\/?[a-z_]+(?:=[^\]]*)?\]/g, '').trim()) : undefined };
+    });
+    items.push({
       id, name,
       group: ch ? ch.id : SHARED_GROUP.id,
       rarity: r.Rarity.toLowerCase(),
-      flavor: koFlavor && !/추후 공개/.test(koFlavor)
-        ? escapeHtml(koFlavor.replace(/\[\/?[a-z_]+(?:=[^\]]*)?\]/g, '').trim())
-        : r.Flavor && !/revealed in the future/i.test(r.Flavor) ? escapeHtml(formatPlain(r.Flavor)) : undefined,
+      flavor: r.Flavor && !/revealed in the future/i.test(r.Flavor) ? escapeHtml(formatPlain(r.Flavor)) : undefined,
       source: r.AncientSource ? String(r.AncientSource).replace(/\{\{[^|}]*\|([^}]*)\}\}/g, '$1').replace(/[\[\]]/g, '').trim() : undefined,
       text: formatText(r.Description),
       img: image(r.Image, 'relics', id, { height: 128, width: 128 }),
-    }, localize('relics', name, r.Description)));
+    });
+  }
+  const groups = [...charGroups(), SHARED_GROUP];
+  putGroups('relics', groups, (lang, g) => (g.id === SHARED_GROUP.id ? SHARED_NAMES[lang].shared : nameOf(lang, 'characters', g.name)));
+  // 묶음 이름에 쓰는 고대의 존재 이름 번역 (값은 영어로 두어 묶음 주소가 바뀌지 않게)
+  for (const lang of ACTIVE) {
+    OVERLAY[lang].labels.relics = { source: Object.fromEntries(ANCIENTS.map(a => [a, nameOf(lang, 'ancients', a) || a])) };
   }
   return {
-    id: 'relics', name: '유물', tile: 'icon', groupLabel: '캐릭터',
+    id: 'relics', name: 'Relics', tile: 'icon', groupKind: 'character',
     // 희귀도별로 나누고, 고대 유물처럼 너무 많은 묶음은 그 유물을 주는 고대의 존재별로 다시 나눈다.
     split: { by: ['rarity'], overflow: 'source', sharedGroup: SHARED_GROUP.id },
-    // 묶음 이름에 쓰는 고대의 존재 한국어 이름 (값은 영어로 두어 묶음 주소가 바뀌지 않게)
-    labels: { source: Object.fromEntries(ANCIENTS.map(a => [a, koName('ancients', a) || a])) },
-    groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), SHARED_GROUP],
+    groups,
     items,
   };
 }
@@ -375,30 +409,35 @@ async function potions() {
     if (!['Common', 'Uncommon', 'Rare'].includes(p.Rarity)) continue;
     const ch = charByEn.get(p.Character);
     const id = slug(name);
-    items.push(applyKo({
+    translate(`potions/${id}`, 'potions', name, p.Text);
+    items.push({
       id, name,
       group: ch ? ch.id : SHARED_GROUP.id,
       rarity: p.Rarity.toLowerCase(),
       text: formatText(p.Text),
       img: image(p.Image, 'potions', id, { height: 128, width: 128 }),
-    }, localize('potions', name, p.Text)));
+    });
   }
+  const groups = [...charGroups(), SHARED_GROUP];
+  putGroups('potions', groups, (lang, g) => (g.id === SHARED_GROUP.id ? SHARED_NAMES[lang].shared : nameOf(lang, 'characters', g.name)));
   return {
-    id: 'potions', name: '포션', tile: 'icon', groupLabel: '캐릭터',
+    id: 'potions', name: 'Potions', tile: 'icon', groupKind: 'character',
     split: { by: ['rarity'], sharedGroup: SHARED_GROUP.id },
-    groups: [...CHARACTERS.map(({ id, name, color }) => ({ id, name, color })), SHARED_GROUP],
+    groups,
     items,
   };
 }
 
 // 1막은 Overgrowth 와 Underdocks 중 하나가 무작위로 나온다.
 const AREAS = [
-  { en: 'Overgrowth', id: 'overgrowth', name: '1막 · Overgrowth', color: '#6f9a4a' },
-  { en: 'Underdocks', id: 'underdocks', name: '1막 · Underdocks', color: '#4a7f9a' },
-  { en: 'Hive', id: 'hive', name: '2막 · Hive', color: '#c99a3a' },
-  { en: 'Glory', id: 'glory', name: '3막 · Glory', color: '#a06ad0' },
+  { en: 'Overgrowth', id: 'overgrowth', act: 1, color: '#6f9a4a' },
+  { en: 'Underdocks', id: 'underdocks', act: 1, color: '#4a7f9a' },
+  { en: 'Hive', id: 'hive', act: 2, color: '#c99a3a' },
+  { en: 'Glory', id: 'glory', act: 3, color: '#a06ad0' },
 ];
-for (const a of AREAS) a.name = a.name.replace(a.en, koName('acts', a.en) || a.en);
+// 지역 이름: 'Act 1 · Overgrowth', '1막 · 과성장'
+const areaName = (lang, a) => `${actLabel(lang, a.act)} · ${lang === 'en' ? a.en : nameOf(lang, 'acts', a.en) || a.en}`;
+for (const a of AREAS) a.name = areaName('en', a);
 const areaByEn = new Map(AREAS.map(a => [a.en, a]));
 
 // 같은 전투에 함께 나오는 적(예: The Kin = Kin Follower + Kin Priest)은 하나로 묶는다.
@@ -422,44 +461,54 @@ function enemyItems(data, type, folder, fallbackArea) {
   return encounters(data, type).map(e => {
     const id = slug(e.name);
     const area = areaByEn.get(e.debut) || fallbackArea;
-    const memberName = n => koName('monsters', n) || n;
-    const nameKo = koName('encounters', e.name) || koName('monsters', e.name);
+    const intents = m => (Array.isArray(m.Intents) ? m.Intents : Object.values(m.Intents || {})).filter(x => x && x.Name);
+    // 이름·지역·기술 이름은 언어마다, 행동 설명은 위키 영어 그대로
+    const describe = (areaLabel, memberName) => escapeHtml([
+      areaLabel,
+      e.hp && `HP ${e.hp}`,
+      e.members.length > 1 && e.members.map(m => memberName(m.name)).join(', '),
+    ].filter(Boolean).join('\n'));
+    for (const lang of ACTIVE) {
+      const memberName = n => nameOf(lang, 'monsters', n) || n;
+      const moves = L10N[lang].moves || {};
+      put(lang, `${folder}/${id}`, {
+        name: nameOf(lang, 'encounters', e.name) || nameOf(lang, 'monsters', e.name),
+        text: describe(area && areaName(lang, area), memberName),
+        area: area && areaName(lang, area),
+        members: e.members.map(m => ({
+          name: memberName(m.name),
+          moves: intents(m).map(x => moves[`${lc(m.name)}|${lc(x.Name)}`] || moves[`*|${lc(x.Name)}`] || String(x.Name)),
+        })),
+      });
+    }
     return {
-      id, name: nameKo || e.name,
-      nameEn: nameKo ? e.name : undefined,
+      id, name: e.name,
       group: area?.id,
-      text: escapeHtml([
-        area?.name,
-        e.hp && `HP ${e.hp}`,
-        e.members.length > 1 && e.members.map(m => memberName(m.name)).join(', '),
-      ].filter(Boolean).join('\n')),
+      text: describe(area?.name, n => n),
       img: image(e.first.Image, folder, id, { height: 220, width: 260, trim: true }),
       area: area?.name,
       members: e.members.map(m => ({
-        name: memberName(m.name),
+        name: m.name,
         hp: m.BaseHP ? String(m.BaseHP) : undefined,
         hpAsc: m.AscHP && m.AscHP !== m.BaseHP ? String(m.AscHP) : undefined,
-        moves: (Array.isArray(m.Intents) ? m.Intents : Object.values(m.Intents || {}))
-          .filter(x => x && x.Name)
-          .map(x => ({
-            name: KO?.moves?.[`${lc(m.name)}|${lc(x.Name)}`] || KO?.moves?.[`*|${lc(x.Name)}`] || String(x.Name),
-            text: formatEnemyText(x.Text),
-          })),
+        moves: intents(m).map(x => ({ name: String(x.Name), text: formatEnemyText(x.Text) })),
       })),
     };
   });
 }
 
-const areaGroups = items => AREAS.filter(a => items.some(i => i.group === a.id)).map(({ id, name, color }) => ({ id, name, color }));
+function enemyCategory(id, name, items) {
+  const groups = AREAS.filter(a => items.some(i => i.group === a.id)).map(({ id, name, color }) => ({ id, name, color }));
+  putGroups(id, groups, (lang, g) => areaName(lang, AREAS.find(a => a.id === g.id)));
+  return { id, name, tile: 'creature', groupKind: 'act', enemy: true, groups, items };
+}
 
 async function bossCategory() {
-  const items = enemyItems(await module('Module:Enemies/StS2 data/Bosses'), 'Boss', 'bosses');
-  return { id: 'bosses', name: '보스', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
+  return enemyCategory('bosses', 'Bosses', enemyItems(await module('Module:Enemies/StS2 data/Bosses'), 'Boss', 'bosses'));
 }
 
 async function eliteCategory() {
-  const items = enemyItems(await module('Module:Enemies/StS2 data/Elites'), 'Elite', 'elites');
-  return { id: 'elites', name: '엘리트', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
+  return enemyCategory('elites', 'Elites', enemyItems(await module('Module:Enemies/StS2 data/Elites'), 'Elite', 'elites'));
 }
 
 async function monsterCategory() {
@@ -467,28 +516,26 @@ async function monsterCategory() {
   for (const area of AREAS) {
     items.push(...enemyItems(await module(`Module:Enemies/StS2 data/${area.en}`), 'Normal', 'monsters', area));
   }
-  return { id: 'monsters', name: '일반 적', tile: 'creature', groupLabel: '막', enemy: true, groups: areaGroups(items), items };
+  return enemyCategory('monsters', 'Monsters', items);
 }
 
 async function enchantmentCategory() {
   const data = await module('Module:Keywords/StS2 data/Enchantments');
   const items = Object.entries(data).map(([name, e]) => {
     const id = slug(name);
-    return applyKo(
-      { id, name, text: formatText(e.Text), img: image(e.Image, 'enchantments', id, { height: 128, width: 128 }) },
-      localize('enchantments', name, e.Text),
-    );
+    translate(`enchantments/${id}`, 'enchantments', name, e.Text);
+    return { id, name, text: formatText(e.Text), img: image(e.Image, 'enchantments', id, { height: 128, width: 128 }) };
   });
-  return { id: 'enchantments', name: '인챈트', tile: 'icon', items };
+  return { id: 'enchantments', name: 'Enchantments', tile: 'icon', items };
 }
 
 const formatPlain = raw => String(raw || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1').replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1').trim();
 
 const ANCIENTS = ['Neow', 'Orobas', 'Darv', 'Tezcatara', 'Tanx', 'Pael', 'Nonupeipe', 'Vakuu'];
 const ANCIENT_ACTS = [
-  { id: 'act1', name: '1막', color: '#6f9a4a' },
-  { id: 'act2', name: '2막', color: '#c99a3a' },
-  { id: 'act3', name: '3막', color: '#a06ad0' },
+  { id: 'act1', act: 1, name: 'Act 1', color: '#6f9a4a' },
+  { id: 'act2', act: 2, name: 'Act 2', color: '#c99a3a' },
+  { id: 'act3', act: 3, name: 'Act 3', color: '#a06ad0' },
 ];
 
 // 위키 문서의 '== Act 2 ==' 같은 구역 아래 나오는 이름으로 각 고대의 존재가 몇 막에 나오는지 알아낸다.
@@ -524,29 +571,35 @@ async function ancientActs() {
 async function charactersAndAncients() {
   const data = await module('Module:Keywords/StS2 data/Characters');
   // 캐릭터는 전신 원화, 고대의 존재는 지도 아이콘을 쓴다.
-  const chars = CHARACTERS.map(c => ({
-    id: c.id, name: koName('characters', c.en) || c.name, nameEn: c.en,
-    img: image(`StS2_${c.en}.png`, 'characters', c.id, { height: 240, width: 200, trim: true }),
-  }));
+  const chars = CHARACTERS.map(c => {
+    for (const lang of ACTIVE) put(lang, `characters/${c.id}`, { name: nameOf(lang, 'characters', c.en) });
+    return { id: c.id, name: c.en, img: image(`StS2_${c.en}.png`, 'characters', c.id, { height: 240, width: 200, trim: true }) };
+  });
   const acts = await ancientActs();
   const ancients = Object.keys(data)
     .filter(name => ANCIENTS.includes(name))
     .map(name => {
       const a = (acts.get(name) || []).map(n => ANCIENT_ACTS[n - 1]).filter(Boolean);
-      const ko = koName('ancients', name);
-      const title = koName('ancientEpithets', name);
+      const describe = (lang, epithet) => escapeHtml([
+        epithet,
+        a.length && APPEARS[lang] + a.map(x => actLabel(lang, x.act)).join(LIST_SEP[lang]),
+      ].filter(Boolean).join('\n')) || undefined;
+      for (const lang of ACTIVE) {
+        put(lang, `ancients/${slug(name)}`, { name: nameOf(lang, 'ancients', name), text: describe(lang, nameOf(lang, 'ancientEpithets', name)) });
+      }
       return {
-        id: slug(name), name: ko || name,
-        nameEn: ko ? name : undefined,
+        id: slug(name), name,
         group: a[0]?.id,
         groups: a.length > 1 ? a.map(x => x.id) : undefined,
-        text: escapeHtml([title, a.length && `등장: ${a.map(x => x.name).join(', ')}`].filter(Boolean).join('\n')) || undefined,
+        text: describe('en'),
         img: image(`StS2_Map-${name}.png`, 'ancients', slug(name), { height: 160, width: 160 }),
       };
     });
+  const groups = ANCIENT_ACTS.map(({ id, name, color }) => ({ id, name, color }));
+  putGroups('ancients', ANCIENT_ACTS, (lang, g) => actLabel(lang, g.act));
   return [
-    { id: 'characters', name: '캐릭터', tile: 'portrait', items: chars },
-    { id: 'ancients', name: '고대의 존재', tile: 'icon', groupLabel: '막', groups: ANCIENT_ACTS, items: ancients },
+    { id: 'characters', name: 'Characters', tile: 'portrait', items: chars },
+    { id: 'ancients', name: 'Ancients', tile: 'icon', groupKind: 'act', groups, items: ancients },
   ];
 }
 
@@ -583,7 +636,12 @@ async function main() {
         if (item[key] === undefined) delete item[key];
       }
     }
-    cat.items.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    cat.items.sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  }
+  const keys = categories.flatMap(c => c.items.map(i => `${c.id}/${i.id}`)).sort();
+  const known = new Set(keys);
+  for (const lang of ACTIVE) {
+    for (const key of Object.keys(OVERLAY[lang].items)) if (!known.has(key)) delete OVERLAY[lang].items[key];
   }
 
   let previous = null;
@@ -599,13 +657,16 @@ async function main() {
   const same = previous && JSON.stringify(previous.categories) === JSON.stringify(categories);
   if (same) out.fetchedAt = previous.fetchedAt;
 
-  await mkdir(DATA, { recursive: true });
+  await mkdir(join(DATA, 'i18n'), { recursive: true });
   await writeFile(join(DATA, 'sts2.json'), JSON.stringify(out));
-  const keys = categories.flatMap(c => c.items.map(i => `${c.id}/${i.id}`)).sort();
   await writeFile(join(DATA, 'keys.json'), JSON.stringify(keys));
+  for (const lang of ACTIVE) await writeFile(join(DATA, 'i18n', `${lang}.json`), JSON.stringify(OVERLAY[lang]));
 
-  for (const c of categories) console.log(`${c.name}: ${c.items.length}개`);
-  if (KO) console.log(`한국어: 이름 ${l10nStats.name}/${l10nStats.total}, 효과 ${l10nStats.text}/${l10nStats.total}`);
+  for (const c of categories) console.log(`${c.name}: ${c.items.length}`);
+  for (const lang of ACTIVE) {
+    const st = stats[lang];
+    console.log(`${lang}: 이름 ${st.name}/${st.total}, 효과 ${st.text}/${st.total}`);
+  }
   console.log(same ? '데이터 변경 없음' : '데이터 갱신됨');
   // 이미지가 일부 빠져도 데이터는 저장하되(이름 타일로 표시됨), 워크플로에서 알 수 있게 표시한다.
   if (imageStats?.failed && process.env.GITHUB_OUTPUT) {

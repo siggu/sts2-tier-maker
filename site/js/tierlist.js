@@ -1,5 +1,7 @@
 // 티어 리스트 상태: 저장, 불러오기, 공유 링크 인코딩.
 
+import { t } from './i18n.js';
+
 export const DEFAULT_TIERS = [
   { label: 'S', color: '#e5484d' },
   { label: 'A', color: '#f2884b' },
@@ -18,7 +20,7 @@ const KEY = id => `sts2tier.v1.${id}`;
 
 export function freshState(template) {
   return {
-    title: `${template.title} 티어`,
+    title: t('tier.defaultTitle', { title: template.title }),
     tiers: DEFAULT_TIERS.map(t => ({ ...t, items: [] })),
     updatedAt: 0,
   };
@@ -39,7 +41,7 @@ function sanitize(state, template) {
   }));
   if (!tiers.length) return null;
   return {
-    title: String(state.title ?? '').slice(0, 80) || `${template.title} 티어`,
+    title: String(state.title ?? '').slice(0, 80) || t('tier.defaultTitle', { title: template.title }),
     tiers,
     updatedAt: state.updatedAt || 0,
   };

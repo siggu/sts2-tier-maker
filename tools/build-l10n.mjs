@@ -1,9 +1,9 @@
-// 게임에서 꺼낸 언어 파일(localization/eng, localization/kor)에서 사이트에 필요한 부분만 뽑아
-// tools/l10n/ko.json 으로 저장한다. 원본 언어 파일 전체는 저장소에 넣지 않는다.
+// 게임에서 꺼낸 언어 파일(localization/eng, localization/kor, jpn, zhs, zht)에서 사이트에 필요한 부분만 뽑아
+// tools/l10n/<언어>.json 으로 저장한다. 원본 언어 파일 전체는 저장소에 넣지 않는다.
 //
-// 사용: node tools/build-l10n.mjs <eng 와 kor 폴더가 들어 있는 폴더>
-// 게임 패치 후 GDRE Tools 로 다시 꺼내 이 스크립트를 돌리고, 바뀐 ko.json 을 커밋하면 된다.
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+// 사용: node tools/build-l10n.mjs <eng 와 언어 폴더들이 들어 있는 폴더>
+// 게임 패치 후 GDRE Tools 로 다시 꺼내 이 스크립트를 돌리고, 바뀐 json 을 커밋하면 된다.
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,16 +12,20 @@ if (!SRC) {
   console.error('사용: node tools/build-l10n.mjs <localization 폴더>');
   process.exit(1);
 }
-const OUT = join(dirname(fileURLToPath(import.meta.url)), 'l10n', 'ko.json');
+const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'l10n');
+// 게임 폴더 이름 → 사이트 언어 코드
+const LANGS = { kor: 'ko', jpn: 'ja', zhs: 'zh-Hans', zht: 'zh-Hant' };
+let TARGET = 'kor';
 
 async function load(lang, file) {
+  if (lang === 'kor') lang = TARGET;
   const text = await readFile(join(SRC, lang, `${file}.json`), 'utf8');
   return JSON.parse(text.replace(/^﻿/, ''));
 }
 
 const lower = s => String(s).trim().toLowerCase();
 
-// "<KEY>.title" 로 영어 이름 → { name, en(효과 틀), ko(효과 틀), flavor }
+// "<KEY>.title" 로 영어 이름 → { name, en(영어 효과 틀), tr(이 언어 효과 틀), flavor }
 async function titled(file, { description = 'description', flavor = false } = {}) {
   const [en, ko] = await Promise.all([load('eng', file), load('kor', file)]);
   const out = {};
@@ -32,9 +36,10 @@ async function titled(file, { description = 'description', flavor = false } = {}
     const entry = { name: ko[k] };
     if (en[`${key}.${description}`] && ko[`${key}.${description}`]) {
       entry.en = en[`${key}.${description}`];
-      entry.ko = ko[`${key}.${description}`];
+      entry.tr = ko[`${key}.${description}`];
     }
-    if (flavor && ko[`${key}.flavor`]) entry.flavor = ko[`${key}.flavor`];
+    // 영어가 '추후 공개' 자리 문구면 빼 둔다
+    if (flavor && ko[`${key}.flavor`] && !/revealed in the future/i.test(en[`${key}.flavor`] || '')) entry.flavor = ko[`${key}.flavor`];
     out[lower(v)] ||= entry;
   }
   return out;
@@ -65,6 +70,14 @@ async function moves() {
   return out;
 }
 
+// 게임 화면의 희귀도·카드 종류 이름
+async function terms() {
+  const ko = await load('kor', 'gameplay_ui');
+  const pick = prefix => Object.fromEntries(Object.entries(ko)
+    .filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k.slice(prefix.length).toLowerCase(), v]));
+  return { rarity: pick('CARD_RARITY.'), relicRarity: pick('RELIC_RARITY.'), type: pick('CARD_TYPE.'), actNumber: ko.ACT_NUMBER };
+}
+
 // 고대의 존재 이름 → 칭호 (예: neow → 부활의 어머니 (추방자))
 async function ancientEpithets() {
   const [en, ko] = await Promise.all([load('eng', 'ancients'), load('kor', 'ancients')]);
@@ -85,7 +98,8 @@ async function keywords() {
   return out;
 }
 
-const data = {
+const build = async () => ({
+  terms: await terms(),
   cards: await titled('cards'),
   relics: await titled('relics', { flavor: true }),
   potions: await titled('potions'),
@@ -98,9 +112,14 @@ const data = {
   encounters: await names('encounters', '.title'),
   monsters: await names('monsters', '.name'),
   moves: await moves(),
-};
+});
 
-await mkdir(dirname(OUT), { recursive: true });
-await writeFile(OUT, JSON.stringify(data, null, 1));
-for (const [k, v] of Object.entries(data)) console.log(`${k}: ${Object.keys(v).length}`);
-console.log(`→ ${OUT}`);
+await mkdir(OUT_DIR, { recursive: true });
+for (const [folder, code] of Object.entries(LANGS)) {
+  if (!await access(join(SRC, folder)).then(() => true, () => false)) { console.log(`${folder}: 없음, 건너뜀`); continue; }
+  TARGET = folder;
+  const data = await build();
+  const out = join(OUT_DIR, `${code}.json`);
+  await writeFile(out, JSON.stringify(data, null, 1));
+  console.log(`${code}: ${Object.entries(data).map(([k, v]) => `${k} ${Object.keys(v).length}`).join(', ')} → ${out}`);
+}

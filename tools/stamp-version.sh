@@ -4,7 +4,7 @@
 set -euo pipefail
 dir="$1"; v="$2"
 sed -i -E "s#(from '\./[A-Za-z0-9_-]+\.js)'#\1?v=${v}'#g" "$dir"/js/*.js
-sed -i -E "s#(src=\"js/app\.js)\"#\1?v=${v}\"#; s#(href=\"css/style\.css)\"#\1?v=${v}\"#" "$dir"/index.html
+sed -i -E "s#(src=\"js/app\.js)\"#\1?v=${v}\"#; s#(href=\"css/[A-Za-z0-9_-]+\.css)\"#\1?v=${v}\"#g" "$dir"/index.html
 # 붙지 않은 상대 import 가 남아 있으면 실패
 if grep -nE "from '\./[A-Za-z0-9_-]+\.js'" "$dir"/js/*.js; then
   echo "버전을 붙이지 못한 import 가 있습니다" >&2; exit 1
