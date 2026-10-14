@@ -18,6 +18,10 @@ export const PALETTE = [
 
 const KEY = id => `sts2tier.v1.${id}`;
 
+// 저장·삭제 알림 (로그인 상태면 community.js 가 서버에 올린다)
+let storageHooks = {};
+export function setStorageHooks(hooks) { storageHooks = hooks || {}; }
+
 export function freshState(template) {
   return {
     title: t('tier.defaultTitle', { title: template.title }),
@@ -27,7 +31,7 @@ export function freshState(template) {
 }
 
 // 데이터가 바뀌어 사라진 아이템은 걸러 낸다.
-function sanitize(state, template) {
+export function sanitize(state, template) {
   if (!state || !Array.isArray(state.tiers)) return null;
   const seen = new Set();
   const tiers = state.tiers.slice(0, 20).map(t => ({
@@ -58,10 +62,12 @@ export function loadState(template) {
 export function saveState(template, state) {
   state.updatedAt = Date.now();
   try { localStorage.setItem(KEY(template.id), JSON.stringify(state)); } catch { /* 저장소 없음 */ }
+  storageHooks.save?.(template.id);
 }
 
 export function clearState(template) {
   try { localStorage.removeItem(KEY(template.id)); } catch { /* 저장소 없음 */ }
+  storageHooks.clear?.(template.id);
 }
 
 export function savedSummary(template) {

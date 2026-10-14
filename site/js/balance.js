@@ -2,6 +2,7 @@
 // '투표 완료'를 누르면 마지막으로 제출한 것과 달라진 표만 서버로 보낸다.
 
 import { t } from './i18n.js';
+import { authHeaders, dropSession } from './auth.js';
 
 const override = new URLSearchParams(location.search).get('api');
 export const API_BASE = override || 'https://sts2-balance-api.siggu100.workers.dev';
@@ -131,10 +132,13 @@ export async function flush() {
   try {
     const res = await fetch(`${API_BASE}/balance`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // 로그인 상태면 서버가 voter 대신 계정으로 기록한다.
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ voter: voterId(), votes: entries.slice(0, 300).map(([item, v]) => ({ item, v })) }),
       keepalive: true,
     });
+    // 세션이 만료됐으면 로그인을 풀고 익명으로 다시 보낸다.
+    if (res.status === 401) { dropSession(); throw new Error('auth'); }
     if (!res.ok && res.status !== 400) throw new Error(String(res.status));
     // 보내는 동안 새로 쌓인 표는 남긴다
     const now = read(PENDING_KEY, {});
