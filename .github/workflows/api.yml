@@ -1,0 +1,70 @@
+name: 밸런스 투표 API 배포 (Cloudflare Workers)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'site/data/keys.json'
+      - '.github/workflows/api.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Cloudflare 시크릿 확인
+        id: secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID 시크릿이 없어 배포를 건너뜁니다."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: D1 데이터베이스 찾기(없으면 생성)
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          find_id() {
+            npx wrangler d1 list --json | node -e '
+              const list = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              const db = list.find(d => d.name === "sts2-balance");
+              process.stdout.write(db ? db.uuid : "");'
+          }
+          id="$(find_id)"
+          if [ -z "$id" ]; then
+            npx wrangler d1 create sts2-balance
+            id="$(find_id)"
+          fi
+          test -n "$id"
+          sed -i "s/__D1_DATABASE_ID__/$id/" wrangler.toml
+
+      - name: 마이그레이션 적용
+        if: steps.secrets.outputs.ok == 'true'
+        run: npx wrangler d1 migrations apply sts2-balance --remote
+
+      - name: 배포
+        if: steps.secrets.outputs.ok == 'true'
+        run: npx wrangler deploy

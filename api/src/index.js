@@ -1,0 +1,134 @@
+import keys from '../../site/data/keys.json';
+import { makeValidator, VOTE_VALUES } from './votes.js';
+
+const MAX_VOTERS_PER_IP_ITEM = 3; // 같은 IP 에서 한 아이템에 표를 무한히 늘리지 못하게
+const RATE_PER_MINUTE = 30;
+const RESULTS_TTL = 30;
+
+const { validKeys, categories, validateBody } = makeValidator(keys);
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const cors = corsHeaders(request, env);
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+    try {
+      if (url.pathname === '/health') return json({ ok: true, items: validKeys.size }, 200, cors);
+      if (url.pathname === '/balance' && request.method === 'POST') return await postVotes(request, env, ctx, cors);
+      if (url.pathname === '/balance' && request.method === 'GET') return await getResults(url, env, ctx, cors);
+      return json({ error: 'not_found' }, 404, cors);
+    } catch (err) {
+      console.error(err);
+      return json({ error: 'internal' }, 500, cors);
+    }
+  },
+};
+
+function corsHeaders(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+  if (allowed.includes(origin)) headers['Access-Control-Allow-Origin'] = origin;
+  return headers;
+}
+
+function json(body, status = 200, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers },
+  });
+}
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+}
+
+async function postVotes(request, env, ctx, cors) {
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad_request', reason: 'json' }, 400, cors); }
+  const reason = validateBody(body);
+  if (reason) return json({ error: 'bad_request', reason }, 400, cors);
+
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const ipHash = await sha256(`${env.IP_SALT || 'sts2-balance'}:${ip}`);
+  const now = Date.now();
+  const minute = Math.floor(now / 60000);
+
+  const rl = await env.DB.prepare(
+    `INSERT INTO rate_limit (ip_hash, minute, n) VALUES (?1, ?2, 1)
+     ON CONFLICT (ip_hash, minute) DO UPDATE SET n = n + 1 RETURNING n`
+  ).bind(ipHash, minute).first();
+  if (rl && rl.n > RATE_PER_MINUTE) return json({ error: 'rate_limited' }, 429, cors);
+
+  // 같은 아이템에 대한 마지막 표만 남긴다
+  const latest = new Map();
+  for (const vote of body.votes) latest.set(vote.item, vote.v);
+
+  // 이 IP 에서 다른 voter 로 이미 표를 낸 수
+  const items = [...latest.keys()];
+  const crowded = new Set();
+  for (let i = 0; i < items.length; i += 90) {
+    const chunk = items.slice(i, i + 90);
+    const placeholders = chunk.map((_, j) => `?${j + 3}`).join(',');
+    const { results } = await env.DB.prepare(
+      `SELECT item, COUNT(*) AS n FROM balance_votes
+       WHERE ip_hash = ?1 AND voter != ?2 AND item IN (${placeholders}) GROUP BY item`
+    ).bind(ipHash, body.voter, ...chunk).all();
+    for (const r of results) if (r.n >= MAX_VOTERS_PER_IP_ITEM) crowded.add(r.item);
+  }
+
+  const upsert = env.DB.prepare(
+    `INSERT INTO balance_votes (item, voter, ip_hash, v, ts) VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT (item, voter) DO UPDATE SET v = excluded.v, ip_hash = excluded.ip_hash, ts = excluded.ts`
+  );
+  const del = env.DB.prepare('DELETE FROM balance_votes WHERE item = ?1 AND voter = ?2');
+  const stmts = [];
+  let skipped = 0;
+  for (const [item, v] of latest) {
+    if (v === null) stmts.push(del.bind(item, body.voter));
+    else if (crowded.has(item)) skipped++;
+    else stmts.push(upsert.bind(item, body.voter, ipHash, VOTE_VALUES[v], now));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+
+  if (Math.random() < 0.02) {
+    ctx.waitUntil(env.DB.prepare('DELETE FROM rate_limit WHERE minute < ?1').bind(minute - 10).run());
+  }
+  return json({ ok: true, saved: stmts.length, skipped }, 200, cors);
+}
+
+// GET /balance?category=cards  →  { items: { 'cards/Bash': [너프, 적당, 버프], ... } }
+async function getResults(url, env, ctx, cors) {
+  const category = url.searchParams.get('category');
+  if (!categories.has(category)) return json({ error: 'bad_request', reason: 'category' }, 400, cors);
+
+  const cache = caches.default;
+  const cacheKey = new Request(`https://cache.sts2-balance/balance?category=${category}`);
+  const hit = await cache.match(cacheKey);
+  if (hit) {
+    const res = new Response(hit.body, hit);
+    for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+    return res;
+  }
+
+  const { results } = await env.DB.prepare(
+    `SELECT item, v, COUNT(*) AS n FROM balance_votes
+     WHERE item >= ?1 AND item < ?2 GROUP BY item, v`
+  ).bind(`${category}/`, `${category}0`).all(); // '0' 은 '/' 다음 문자
+  const items = {};
+  for (const { item, v, n } of results) {
+    (items[item] ||= [0, 0, 0])[v - 1] = n;
+  }
+
+  const res = json({ category, updatedAt: Date.now(), items }, 200, { 'Cache-Control': `public, max-age=${RESULTS_TTL}` });
+  ctx.waitUntil(cache.put(cacheKey, res.clone()));
+  for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+  return res;
+}

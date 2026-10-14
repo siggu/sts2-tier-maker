@@ -1,0 +1,14 @@
+name = "sts2-balance-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# 프런트엔드(GitHub Pages)에서 호출을 허용할 출처. 쉼표로 여러 개 지정.
+[vars]
+ALLOWED_ORIGINS = "https://siggu.github.io,http://localhost:8000,http://127.0.0.1:8000"
+
+# database_id 는 배포 워크플로가 계정의 D1 목록에서 찾아(없으면 만들어) 채운다.
+[[d1_databases]]
+binding = "DB"
+database_name = "sts2-balance"
+database_id = "__D1_DATABASE_ID__"
+migrations_dir = "migrations"

@@ -1,0 +1,13 @@
+{
+  "name": "sts2-balance-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "migrate:local": "wrangler d1 migrations apply sts2-balance --local",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "4.143.1"
+  }
+}
