@@ -1,4 +1,4 @@
-import { loadData } from './data.js';
+import { loadData, facetLabel } from './data.js';
 import { h, toast, tile, hideTip, attachTooltips } from './ui.js';
 import { board } from './ui.js';
 import { poolControls, applyFilter } from './filters.js';
@@ -607,12 +607,57 @@ const sortLabel = (k, verdicts) => {
 };
 const pct = (n, total) => (total ? Math.round((n / total) * 100) : 0);
 
+// 결과를 나눠 보는 기준. 묶음 안에서 값이 두 가지 이상인 분류만 고를 수 있다.
+const RESULT_FACETS = ['rarity', 'type', 'group', 'source'];
+const RARITY_ORDER = ['basic', 'starter', 'common', 'uncommon', 'rare', 'shop', 'event', 'ancient', 'special', 'boss', 'curse', 'status'];
+const TYPE_ORDER = ['attack', 'skill', 'power', 'status', 'curse', 'quest'];
+const FACET_COLOR = {
+  rarity: { basic: '#8d8a80', starter: '#8d8a80', common: '#a9a69c', uncommon: '#4f93cf', rare: '#e2b33f', shop: '#5fae6a', event: '#4fb3a4', ancient: '#a06ad0' },
+  type: { attack: '#c8463c', skill: '#4a86c8', power: '#d0a040' },
+};
+const itemGroups = item => [...new Set([item.group, ...(item.groups || [])].filter(Boolean))];
+
+function resultFacetName(cat, f) {
+  if (f === 'group') return cat.groupLabel || '분류';
+  return { rarity: '희귀도', type: '종류', source: '고대의 존재' }[f];
+}
+
+function resultFacets(template) {
+  const cat = template.category;
+  return RESULT_FACETS.filter(f => {
+    const values = new Set(template.items.flatMap(i => (f === 'group' ? itemGroups(i) : i[f] ? [i[f]] : [])));
+    return values.size > 1;
+  });
+}
+
+// rows([{ item, c }])를 분류 값별 묶음으로. 순서는 게임 안 순서(희귀도·캐릭터·막 등)를 따른다.
+function bucketRows(template, f, rows) {
+  const cat = template.category;
+  let keys;
+  if (f === 'group') keys = cat.groups.map(g => ({ value: g.id, label: g.name, color: g.color }));
+  else {
+    const order = f === 'rarity' ? RARITY_ORDER : f === 'type' ? TYPE_ORDER : [];
+    const values = [...new Set(template.items.map(i => i[f]).filter(Boolean))];
+    const rank = v => (order.includes(v) ? order.indexOf(v) : order.length);
+    if (f === 'source') values.sort((a, b) => template.items.findIndex(i => i[f] === a) - template.items.findIndex(i => i[f] === b));
+    else values.sort((a, b) => rank(a) - rank(b));
+    keys = values.map(v => ({ value: v, label: cat.labels?.[f]?.[v] || facetLabel(f, v), color: FACET_COLOR[f]?.[v] }));
+  }
+  const has = (item, v) => (f === 'group' ? itemGroups(item).includes(v) : item[f] === v);
+  const buckets = keys.map(k => ({ ...k, rows: rows.filter(r => has(r.item, k.value)) }));
+  const rest = rows.filter(r => !keys.some(k => has(r.item, k.value)));
+  if (rest.length) buckets.push({ value: '', label: '기타', rows: rest });
+  return buckets.filter(b => b.rows.length);
+}
+
 async function viewResults(templateId) {
   const template = db.template(templateId);
   if (!template) return notFound();
   const VERDICTS = verdictsFor(template.category.id);
   let sort = 'nerf';
   let layout = 'list';
+  const facets = resultFacets(template);
+  let facet = facets[0] || '';
   flush();
 
   render(h('section', { class: 'empty' }, h('p', {}, '결과를 불러오는 중…')));
@@ -638,7 +683,14 @@ async function viewResults(templateId) {
   function draw() {
     const shown = onlyMine ? voted.filter(r => mine[r.item.id]) : voted;
     const sorted = shown.slice().sort((a, b) => SORTS[sort].score(b.c) - SORTS[sort].score(a.c) || sum(b.c) - sum(a.c));
-    const body = layout === 'list' ? listView(sorted) : boardView(sorted);
+    const view = layout === 'list' ? listView : boardView;
+    const buckets = facet ? bucketRows(template, facet, sorted) : null;
+    const body = buckets
+      ? buckets.map(b => h('section', { class: 'result-sec' },
+        h('h2', { class: 'block-title', style: { '--accent': b.color || 'var(--gold)' } }, b.label,
+          h('span', { class: 'my-sec-count' }, `${b.rows.length}개`)),
+        view(b.rows)))
+      : view(sorted);
     render(
       boardHeader('balance', template),
       h('div', { class: 'board-head' },
@@ -653,6 +705,10 @@ async function viewResults(templateId) {
           myInTemplate > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': '표시 범위' },
             h('button', { class: onlyMine ? null : 'on', onclick: () => { onlyMine = false; draw(); } }, '전체'),
             h('button', { class: onlyMine ? 'on' : null, onclick: () => { onlyMine = true; draw(); } }, '내 표만'),
+          ),
+          facets.length > 0 && h('div', { class: 'seg', role: 'group', 'aria-label': '나눠 보기' },
+            facets.map(f => h('button', { class: facet === f ? 'on' : null, onclick: () => { facet = f; draw(); } }, `${resultFacetName(template.category, f)}별`)),
+            h('button', { class: facet ? null : 'on', onclick: () => { facet = ''; draw(); } }, '한 번에'),
           ),
           h('div', { class: 'seg', role: 'group', 'aria-label': '보기 방식' },
             h('button', { class: layout === 'list' ? 'on' : null, onclick: () => { layout = 'list'; draw(); } }, '목록'),
@@ -682,7 +738,7 @@ async function viewResults(templateId) {
         tile(item, template),
         h('div', { class: 'result-main' },
           h('div', { class: 'result-name' }, item.name,
-            item.groupName && !template.group && h('span', { class: 'result-group' }, item.groupName),
+            item.groupName && !template.group && facet !== 'group' && h('span', { class: 'result-group' }, item.groupName),
             myChip(VERDICTS, mine[item.id], c)),
           h('div', { class: 'bar', role: 'img', 'aria-label': VERDICTS.map((v, i) => `${v.sub} ${pct(c[i], total)}%`).join(', ') },
             VERDICTS.map((v, i) => c[i] > 0 && h('span', { class: `seg-${v.v}`, style: { flexGrow: c[i], background: v.color } },

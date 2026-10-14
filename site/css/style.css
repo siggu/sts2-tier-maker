@@ -803,3 +803,8 @@ body.modal-open { overflow: hidden; }
   .result-name { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; }
   .my-stat { flex: 1 1 40%; min-width: 0; }
 }
+
+/* 결과 나눠 보기 */
+.result-sec { margin-top: 22px; }
+.result-sec:first-of-type { margin-top: 6px; }
+.result-sec .block-title { font-size: 18px; margin-bottom: 10px; }
