@@ -169,7 +169,12 @@ export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorat
 
   // 더블클릭(읽기 전용 보드는 클릭)으로 상세 정보
   if (onOpen) {
+    // 더블클릭으로 열기는 마우스에서만. 터치는 항목이 빠진 자리로 다음 항목이 밀려와
+    // 빠른 연속 탭이 더블 탭으로 잡히므로 '자세히' 버튼을 쓴다.
+    let lastPointer = 'mouse';
+    root.addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
     root.addEventListener('dblclick', e => {
+      if (lastPointer !== 'mouse') return;
       const t = e.target.closest('.tile');
       if (t) { hideTip(); onOpen(t.dataset.id); }
     });

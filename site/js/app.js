@@ -153,17 +153,18 @@ function viewHome(mode) {
       const st = templateStatus(t, summaryFor(mode, t));
       if (st) counts[st]++;
     }
+    const touched = counts.progress + counts.submit + counts.done;
     return h('a', { class: 'cat-card', href },
       thumbs(cat.items, cat.tile, 4),
       h('div', { class: 'cat-card-body' },
         h('h3', {}, cat.name),
         h('p', {}, CATEGORY_BLURB[cat.id] || ''),
         h('div', { class: 'cat-card-meta' },
+          // 완료한 묶음 / 전체 묶음: 다 끝냄 초록, 일부 주황, 시작 안 함 빨강
+          h('span', { class: `st ${stateClass(counts.done, templates.length, touched)}`, title: '완료한 묶음 / 전체 묶음' },
+            `${counts.done === templates.length ? '✓ ' : ''}${counts.done}/${templates.length}`),
           h('span', {}, `${cat.items.length}개`),
-          templates.length > 1 && h('span', {}, `묶음 ${templates.length}개`),
           counts.submit > 0 && h('span', { class: 'badge-submit' }, `제출 필요 ${counts.submit}`),
-          counts.progress > 0 && h('span', { class: 'badge-on' }, `진행 중 ${counts.progress}`),
-          counts.done > 0 && h('span', { class: 'badge-done' }, `✓ 완료 ${counts.done}`),
         ),
       ),
     );
@@ -189,17 +190,18 @@ function viewHome(mode) {
 function templateCard(mode, t, summary = summaryFor(mode, t), showCategory = false) {
   const m = MODES[mode];
   const status = templateStatus(t, summary);
-  const meta = {
-    null: `${t.items.length}개`,
-    progress: `${summary?.placed} / ${t.items.length}`,
-    submit: `${summary?.placed} / ${t.items.length} · 제출 필요`,
-    done: mode === 'tier' ? `✓ 완료 · ${t.items.length}개` : `✓ 제출 완료 · ${t.items.length}개`,
-  }[status];
+  const placed = summary?.placed || 0;
+  const meta = [
+    // 배치(분류)한 항목 / 전체 항목: 다 끝냄 초록, 일부 주황, 시작 안 함 빨강
+    h('span', { class: `st ${status === 'done' ? 'st-done' : stateClass(placed, t.items.length, status ? 1 : 0)}` },
+      `${status === 'done' ? '✓ ' : ''}${placed}/${t.items.length}`),
+    status === 'submit' && h('span', { class: 'badge-submit' }, '제출 필요'),
+  ];
   return h('a', { class: `tpl-card${status ? ` is-${status}` : ''}`, href: m.href(t), style: t.group?.color ? { '--accent': t.group.color } : null },
     thumbs(t.items, t.tile, 4),
     h('div', { class: 'tpl-card-body' },
       h('strong', {}, showCategory ? t.title : (t.parts.length ? t.label : '전체')),
-      h('span', { class: 'tpl-card-meta' }, meta),
+      h('div', { class: 'tpl-card-meta' }, meta),
       (status === 'progress' || status === 'submit') && progressBar(summary.placed, t.items.length),
     ),
   );
@@ -225,7 +227,7 @@ function viewCategory(mode, catId) {
     if (sec === 'all') return '한 번에 전부';
     if (sec === 'rarity') return '희귀도별';
     if (sec === 'type') return '종류별';
-    if (sec === 'group') return `${cat.groupLabel || '캐릭터'} 전용`;
+    if (sec === 'group') return cat.groupLabel === '막' ? '막별' : `${cat.groupLabel || '캐릭터'} 전용`;
     return cat.groups.find(g => g.id === sec)?.name || sec;
   };
   const color = sec => cat.groups.find(g => g.id === sec)?.color;
@@ -282,6 +284,12 @@ function balanceSummary(template) {
   const placed = Object.values(mine).flat().filter(id => template.byId.has(id)).length;
   const unsubmitted = unsubmittedChanges(template.category.id, mine, template.items.map(i => i.id)).length;
   return placed || unsubmitted ? { placed, unsubmitted } : null;
+}
+
+// 진행 색: 다 끝냄 → done(초록), 일부 → partial(주황), 아무것도 안 함 → none(빨강)
+function stateClass(done, total, touched = done) {
+  if (total > 0 && done >= total) return 'st-done';
+  return touched > 0 || done > 0 ? 'st-partial' : 'st-none';
 }
 
 // 묶음 상태: null(시작 안 함) | 'progress'(진행 중) | 'submit'(제출 필요) | 'done'(완료)
