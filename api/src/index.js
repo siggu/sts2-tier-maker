@@ -4,6 +4,7 @@ import { corsHeaders, json, sha256 } from './http.js';
 import { getUser } from './auth.js';
 import { handleAccount } from './account.js';
 import { handlePlay } from './play.js';
+import { handleCups } from './cups.js';
 
 const MAX_VOTERS_PER_IP_ITEM = 3; // 같은 IP 에서 한 아이템에 표를 무한히 늘리지 못하게
 const RATE_PER_MINUTE = 30;
@@ -23,7 +24,8 @@ export default {
       if (url.pathname === '/balance' && request.method === 'GET') return await getResults(url, env, ctx, cors);
       // 로그인·동기화·갤러리·댓글 (account.js), 모두의 티어표·A vs B (play.js). 처리하지 않으면 null.
       const res = (await handleAccount(request, env, ctx, { url, cors, keys: validKeys }))
-        ?? (await handlePlay(request, env, ctx, { url, cors, keys: validKeys }));
+        ?? (await handlePlay(request, env, ctx, { url, cors, keys: validKeys }))
+        ?? (await handleCups(request, env, ctx, { url, cors, keys: validKeys }));
       if (res) return res;
       return json({ error: 'not_found' }, 404, cors);
     } catch (err) {

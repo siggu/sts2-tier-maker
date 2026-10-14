@@ -8,10 +8,11 @@ import zhHans from './i18n-zh-Hans.js';
 import zhHant from './i18n-zh-Hant.js';
 import account from './i18n-account.js';
 import playText from './i18n-play.js';
+import cupsText from './i18n-cups.js';
 
 const DICTS = { ko, en, ja, 'zh-Hans': zhHans, 'zh-Hant': zhHant };
 // 기능별 문구 파일({ ko: {...}, en: {...}, ... })을 합친다.
-for (const extra of [account, playText]) {
+for (const extra of [account, playText, cupsText]) {
   for (const [code, entries] of Object.entries(extra)) if (DICTS[code]) Object.assign(DICTS[code], entries);
 }
 export const LANGS = [
