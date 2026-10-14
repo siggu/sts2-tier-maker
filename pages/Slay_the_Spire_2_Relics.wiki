@@ -1,0 +1,106 @@
+{{Sequel Disambiguation|1|1}}
+{{Ambox
+| color = var(--highlight-color-boss)
+| icon = StS2_FresnelLens.png
+| message = ''This is information about '''Relics''' in Slay the Spire. A full searchable list can be found at [[StS2:Relics List|Relics List (Slay the Spire 2)]].''
+}}
+{{Small Relic Infobox|Divine Right|2}}
+Relics are permanent items that give a passive bonus for the duration of the run. Most relics can be obtained regardless of the character you are playing. Each character has 9 Relics that can only be obtained by them.
+
+Starter Relics are given to each character when beginning a run. This starter relic can later be replaced with an  {{QueryLink2|Relics|rarity:Ancient|upgraded version}} by picking up the {{R2|Touch of Orobas}} from the {{2|Ancient}} {{KW2|Orobas}} at the start of {{2|Acts#Act 2|Act 2}}, when offered.
+{| class="wikitable"
+|+Starting Relics and Upgrades
+! Character
+! Starter
+! Ancient Upgrade
+|-
+|{{KW2|Ironclad}} ||{{R2|Burning Blood}} || {{R2|Black Blood}}
+|-
+|{{KW2|Silent}} ||{{R2|Ring of the Snake}} ||{{R2|Ring of the Drake}}
+|-
+|{{KW2|Regent}} || {{R2|Divine Right}} || {{R2|Divine Destiny}}
+|-
+|{{KW2|Necrobinder}} ||{{R2|Bound Phylactery}} || {{R2|Phylactery Unbound}}
+|-
+|{{KW2|Defect}} || {{R2|Cracked Core}} || {{R2|Infused Core}}
+|}
+
+== Obtaining Relics ==
+* '''Relics''' can be obtained from a variety of sources including {{2|Elites}}, {{2|Map_Locations#Treasure_Room|Treasure Rooms}}, the {{2|Merchant}}, or using the {{R2|Shovel}} at {{2|Rest Sites}}.
+* {{QueryLink2|Relics|rarity:Ancient|Ancient Relics}} are only offered by {{2|Ancients}} at the beginning of each {{2|Act}}.
+* {{QueryLink2|Relics|rarity:Shop|Shop Relics}} are only obtainable from the {{2|Merchant}}. The third slot in the Merchant's relic offers is always stocked with a {{QueryLink2|Relics|rarity:Shop|Shop Relic}}. There are 30 shop relics. Each character has 1 shop relic that is exclusive to them.
+* {{QueryLink2|Relics|rarity:Event|Event Relics}} are obtained through {{2|Events}} and cannot be obtained by any other means.
+* {{QueryLink2|Relics|rarity:Special|Special Relics}} '''only''' include the {{R2|Circlet}} which is obtained by collecting or encountering every other relic available in a run. (Relics can only be encountered once in a run)
+
+== Spawn Restrictions ==
+* {{R2|Juzu Bracelet}} will not spawn when using the {{2|Custom Mode}} modifier {{KW2|Deadly Events}}.
+* Character-specific relics cannot spawn in {{2|Map_Locations#Treasure_Room|Treasure Rooms}} due to how they work in {{2|Multiplayer}}. Because each player can choose which relic they want, character-specific relics are excluded so players playing other characters cannot take them.<ref>https://youtu.be/GEo7bEAIpds</ref>
+* Relics can only be encountered once in a run, except for in the case that you skip a relic at a {{2|Map_Locations#Treasure_Room|Treasure Rooms}}, in which case the relic is ''not'' removed from the pool, and can be encountered later.<ref>https://youtu.be/PPHPQAXBPZQ</ref>
+* The game checks whether or not the player has reached the Act 3 {{2|Map_Locations#Treasure_Room|Treasure Chest}} on floor 41 (38 in {{2|Multiplayer}} since each Act is one floor shorter there). This is to prevent certain relics that give some value over the course of a run from appearing at the Act 3 chest or later floors. Note that {{R2|Golden Compass}} increases the length of {{2|Acts#Act 2|Act 2}} by 2 floors, meaning this check erroneously stops the relics from spawning 2 floors too early. The following relics are all relics with that spawn restriction: 
+** {{R2|Amethyst Aubergine}}
+** {{R2|Book of Five Rings}}
+** {{R2|Bowler Hat}}
+** {{R2|Dragon Fruit}}
+** {{R2|Frozen Egg}}
+** {{R2|Girya}}
+** {{R2|Juzu Bracelet}}
+** {{R2|Lasting Candy}}
+** {{R2|Lucky Fysh}}
+** {{R2|Meal Ticket}}
+** {{R2|Molten Egg}}
+** {{R2|Old Coin}}
+** {{R2|Planisphere}}
+** {{R2|Shovel}}
+** {{R2|Toxic Egg}}
+** {{R2|White Beast Statue}}
+** {{R2|White Star}}
+
+== Rarity ==
+General odds for {{QueryLink2|Relics|rarity:Common|Common}}, {{QueryLink2|Relics|rarity:Uncommon|Uncommon}}, and {{QueryLink2|Relics|rarity:Rare|Rare}} relics from {{2|Elites}}, {{2|The Merchant|Shops}}, and {{2|Map_Locations#Treasure_Room|Chests}}:
+{| class="wikitable"
+!Rarity
+|Percentage
+|-
+!Common
+|50%
+|-
+!Uncommon
+|33%
+|-
+!Rare
+|17%
+|}
+
+== Relic Count ==
+{| class="wikitable"
+! Rarity
+! Count
+|-
+! {{QueryLink2|Relics|rarity:Starter|Starter}}
+| {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Starter" AND Game = "2"}} (5 base and 5 upgrade)
+|-
+! {{QueryLink2|Relics|rarity:Common|Common}}
+| | {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Common" AND Game = "2"}}
+|-
+! {{QueryLink2|Relics|rarity:Uncommon|Uncommon}}
+| | {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Uncommon" AND Game = "2"}}
+|-
+! {{QueryLink2|Relics|rarity:Rare|Rare}}
+| | {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Rare" AND Game = "2"}}
+|-
+! {{QueryLink2|Relics|rarity:Ancient|Ancient}}
+| | {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Ancient" AND Game = "2"}}
+|-
+! {{QueryLink2|Relics|rarity:Shop|Shop}}
+| {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Shop" AND Game = "2"}}
+|-
+! {{QueryLink2|Relics|rarity:Event|Event}}
+| {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Event" AND Game = "2"}}
+|-
+! {{QueryLink2|Relics|rarity:Special|Special}}
+| {{#cargo_query: |tables=Relics|fields=COUNT(*)=Count|where=Rarity="Special" AND Game = "2"}}
+|}
+
+{{Relic2Nav}}
+
+[[Category:Slay the Spire 2 Content]] [[Category:ToUpdate]] [[Category:Relics]]

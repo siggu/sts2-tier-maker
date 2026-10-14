@@ -1,0 +1,1 @@
+return require [[Module:Enemies/StS2 data/Overgrowth]]

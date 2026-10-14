@@ -1,0 +1,9 @@
+{{#setmainimage:StS2 Map.png|quiet}}
+{{Sequel Disambiguation|2}} {{Stub}} __NOTOC__
+
+[[Slay the Spire 2:Main|Slay the Spire 2]] is divided into 3 distinct Acts. Each node on the map is represented by a {{2|Map Locations|Map Location}}. This game features alternate Acts which are currently only implemented for Act 1, choosing randomly between {{2|Overgrowth}} and {{2|Underdocks}}. Each Act begins by meeting an {{2|Ancient}} which give you the option to choose between a selection of 3 boons and ends with a fight against a {{2|Bosses|Boss}}. {{KW2|Neow}} will always meet you at the start of Act 1 (with the exception of the very first run of a save game). Every Act has a unique selection of {{2|Events}}, {{2|Monsters}}, {{2|Elites}}, and {{2|Bosses}}.
+
+{{ActNav}}
+[[Category:Acts]]
+[[Category:Game Mechanics]]
+[[Category:Slay the Spire 2 Content]]

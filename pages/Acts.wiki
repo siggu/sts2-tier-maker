@@ -1,0 +1,14 @@
+{{Sequel Disambiguation|1}}{{#setmainimage:Map.png|quiet}}
+{{Ambox
+| title = WARNING!
+| color = red
+| icon = GremlinNob.png
+| message = ''This page is under construction. Information may be wrong or incomplete.''
+}}
+__NOTOC__
+
+[[Main Page|Slay the Spire]] is divided into 3 distinct Acts. Each node on the map is represented by a [[Map Locations|Map Location]]. The Exordium begins by meeting {{E|Neow}} which give you the option to choose between a selection of up to 4 blessings and ends with a fight against a [[Bosses|Boss]]. Every Act has an unique selection of [[Events]], [[Monsters]], [[Elites]], and [[Bosses]].
+
+{{ActNav}}
+[[Category:Acts]]
+[[Category:Game Mechanics]]

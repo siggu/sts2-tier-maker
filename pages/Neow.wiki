@@ -1,0 +1,84 @@
+{{Sequel Disambiguation}}
+[[File:Neow.png|400px|center]]{{#setmainimage:Neow.png|quiet}}Neow is a large whale-like creature with light blue skin and 6 bright yellow eyes. Neow lies at the foot of the Spire and welcomes the player at the beginning of every run.
+
+Neow blesses you based on the success of your previous run, offering [[Gold]], [[Relics]], or [[Cards]], unless you did not reach the [[Boss]] of the [[Acts#Act 1: Exordium|Exordium]], in which case she only offers two options instead of the usual four. 
+
+== Shortlist (Two Blessings) Variant ==
+If you did not reach the [[Boss]] of the [[Acts#Act 1: Exordium|Exordium]] in your last run, the Blessings she will offer are always:
+
+* Max HP +8/6/7/7 {{Asc|14|+7/5/6/6}} ([[Ironclad]] / [[Silent]] / [[Defect]] / [[Watcher]])
+* {{R|Neow's Lament}}: Enemies in the next three combats will have one health.
+** If the map layout allows, you can use this to get a free shot at an [[Elite]] (colloqiually called a 'snipe').
+
+== Standard (Four Blessings) Variant ==
+If you did reach the first boss, Neow will offer you four blessings to choose from.
+
+=== First Blessing ===
+A card-related reward from the list below:
+
+* Remove a card.
+* [[Transform]] a card.
+* [[Upgrade]] a card.
+* Choose a card to obtain. (''Choose one of 3 random cards of your character.'')
+* Choose an {{QueryLink|Cards|rarity:Uncommon|Uncommon}} {{QueryLink|Cards|color:Colorless|Colorless Card}} to obtain.
+* Obtain a random {{QueryLink|Cards|rarity:Rare|Rare Card}}.
+
+=== Second Blessing ===
+A reward from the list below:
+
+* Max HP +8/6/7/7 {{Asc|14|+7/5/6/6}} ([[Ironclad]] / [[Silent]] / [[Defect]] / [[Watcher]]) <!-- To verify Asc info -->
+* {{R|Neow's Lament}}: Enemies in the next three combats will have one health.
+* Obtain a random {{QueryLink|Relics|rarity:Common|Common Relic}}.
+* Receive 100 [[Gold]].
+* Obtain 3 random [[Potions]].
+
+=== Third Blessing ===
+A composite of a disadvantage and a more powerful reward. It can be a combination of any disadvantage and reward below, with any exceptions noted.
+
+'''Disadvantages:'''
+* <span class=negative-text> Lose Max HP. </span> (-8/7/7/7) {{Asc|14|(-7/6/7/6)}} ([[Ironclad]] / [[Silent]] / [[Defect]] / [[Watcher]])
+* <span class=negative-text> Take X damage. </span>
+** X is equal to <code>(Current HP / 10, rounded down) * 3</code>.
+** The amount of damage is also affected by {{Asc|6|Ascension}} and {{Asc|14|Ascension}}.
+* <span class=negative-text> Obtain a {{QueryLink|Cards|type:Curse|Curse}}. </span>
+* <span class=negative-text> Lose all [[Gold]]. </span>
+
+'''Advantages:'''
+* <span class=positive-text> Remove 2 cards. </span>
+** Does not pair with '''Obtain a Curse'''.
+* <span class=positive-text> [[Transform]] 2 cards. </span>
+* <span class=positive-text> Gain 250 [[Gold]].</span>
+** Does not pair with '''Lose all Gold'''.
+* <span class=positive-text> Choose a {{QueryLink|Cards|rarity:Rare|Rare Card}} to obtain.</span>
+* <span class=positive-text> Choose a {{QueryLink|Cards|rarity:Rare|Rare}} {{QueryLink|Cards|color:Colorless|Colorless Card}} to obtain. </span>
+* <span class=positive-text> Obtain a random {{QueryLink|Relics|rarity:Rare|Rare Relic}}.</span>
+* <span class=positive-text> Gain Max HP. </span> (+16/12/14/14) {{Asc|14|(+14/10/12/12)}} ([[Ironclad]] / [[Silent]] / [[Defect]] / [[Watcher]]) <!-- To verify Asc info -->
+** Does not pair with '''Lose max health'''
+
+=== Fourth Blessing ===
+* Replace your {{QueryLink|Relics|rarity:Starter|starter relic}} with a random {{QueryLink|Relics|rarity:Boss|Boss Relic}}. (''Cannot switch to the stronger version of your character's Base Relic.'')
+** Commonly referred to as '''Boss Swap'''.
+
+== Lore ==
+When choosing to '''Read''' at the Act 2 event {{E|Cursed Tome}}, you learn about the connection between [[Neow]] and the 4 playable characters.
+<i><blockquote>Odd. The book seems to be about an {{TS|gold||Ancient}} named {{TS|gold||Neow.}}
+This piques your interest, but you have a general feeling of {{TS|purple|up|malaise.}}</blockquote>
+<blockquote>The Ancient of resurrection, {{TS|gold||Neow}} was exiled to the bottom of the Spire.<br>
+You feel compelled to read more, but your body begins to {{TS|red|up|ache.}}</blockquote>
+<blockquote>Seeking vengeance, {{TS|gold||Neow}} blesses outsiders, using them for her own purposes.<br>
+You are starting to feel very {{TS|red|up|weak and tired.}}</blockquote>
+<blockquote>Those resurrected by {{TS|gold||Neow}} remember only fragments of their past selves, cursed to fight for eternity.<br>
+As you near the final page, your {{TS|red|shake|old wounds begin to reopen!}}</blockquote>
+
+<blockquote>
+Upon finishing the tome, you decide to take it with you. With proof in hand, will you retain your memories?</blockquote></i>
+
+== Trivia ==
+* After defeating the {{M|Corrupt Heart}}, an extra screen plays after the credits, depicting her saying "Has ... it ... been ... done? / The Spire sleeps ... and so shall I"
+* Neow is depicted as possessing powerful magical abilities, which go as far as resurrecting the dead, which she shows whenever an adventurer dies atop the Spire, so they can continue their duty.
+* Little is known about Neow as she is not very talkative herself. However her actions suggest that she begrudges the Spire and wants to destroy it, and does so by sending resurrected adventurers up the Spire.
+* The {{E|Sensory Stone}} event references the [[Defect]]'s first interaction with Neow.
+* Her name may be an onomatopoeia of a whale song.
+
+[[Category:Events]]
+[[Category:ToUpdate]]

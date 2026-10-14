@@ -1,0 +1,277 @@
+local all_data = {
+    ["Arsenal"] = {
+        Code = "$Arsenal",
+        Text = "Whenever you create a card, gain X $Strength.",
+        Sources = { { Type = "C", Name = "Arsenal" } },
+        Link = "Arsenal",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Arsenal.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Black Hole"] = {
+        Code = "$Black Hole",
+        Text = "Whenever you spend or gain 1 @ST, deal X damage to ALL enemies.",
+        Sources = { { Type = "C", Name = "Black Hole" } },
+        Link = "Black_Hole",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_BlackHole.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Child of the Stars"] = {
+        Code = "$Child of the Stars",
+        Text = "Gain X $Block for each 1 @ST spent.",
+        Sources = { { Type = "C", Name = "Child of the Stars" } },
+        Link = "Child_of_the_Stars",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_ChildOfTheStars.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Foregone Conclusion"] = {
+        Code = "$Foregone Conclusion",
+        Text = "Next turn, put X cards from your Draw Pile into your Hand.",
+        Sources = { { Type = "C", Name = "Foregone Conclusion" } },
+        Link = "Foregone_Conclusion",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_ForegoneConclusion.png",
+        BetweenBehavior = "Consumed",
+        TableOrder = 6,
+    },
+
+    ["Furnace"] = {
+        Code = "$Furnace",
+        Text = "At the start of your turn, $Forge X.",
+        Sources = { { Type = "C", Name = "Furnace" } },
+        Link = "Furnace",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Furnace.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Genesis"] = {
+        Code = "$Genesis",
+        Text = "At the start of your turn, gain X @ST.",
+        Sources = { { Type = "C", Name = "Genesis" } },
+        Link = "Genesis",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Genesis.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Hammer Time"] = {
+        Code = "$Hammer Time",
+        Text = "Whenever you $Forge, all allies $Forge as well.",
+        Sources = { { Type = "C", Name = "Hammer Time" } },
+        Link = "Hammer_Time",
+        Type = "Buff",
+        Stacks = "Does not stack",
+        Image = "StS2_Icon_HammerTime.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Monarch's Gaze"] = {
+        Code = "$Monarch's Gaze",
+        Text = "Whenever you attack an enemy, it loses X $Strength this turn.",
+        Sources = { { Type = "C", Name = "Monarch's Gaze" } },
+        Link = "Monarch's_Gaze",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_MonarchsGaze.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Monologue"] = {
+        Code = "$Monologue",
+        Text = "Whenever you play a card this turn, gain 1 $Strength this turn.",
+        Sources = { { Type = "C", Name = "Monologue" } },
+        Link = "Monologue",
+        Type = "Buff",
+        Stacks = "Does not stack",
+        Image = "StS2_Icon_Monologue.png",
+        Notes = "$Strength gained is also removed at the end of turn.",
+        BetweenBehavior = "Removed",
+        TableOrder = 6,
+    },
+
+    ["Orbit"] = {
+        Code = "$Orbit",
+        Text = "Every 4 @RE you spend, gain X @RE.",
+        Sources = { { Type = "C", Name = "Orbit" } },
+        Link = "Orbit",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Orbit.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Pale Blue Dot"] = {
+        Code = "$Pale Blue Dot",
+        Text = "If you play 5 or more cards in a turn, draw X additional cards at the start of your next turn.",
+        Sources = { { Type = "C", Name = "Pale Blue Dot" } },
+        Link = "Pale_Blue_Dot",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_PaleBlueDot.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Parry"] = {
+        Code = "$Parry",
+        Text = "Sovereign Blade now gains X $Block.",
+        Sources = { { Type = "C", Name = "Parry" } },
+        Link = "Parry",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Parry.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Pillar of Creation"] = {
+        Code = "$Pillar of Creation",
+        Text = "The first time you create a card each turn, gain X $Block.",
+        Sources = { { Type = "C", Name = "Pillar of Creation" } },
+        Link = "Pillar_of_Creation",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_PillarOfCreation.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Reflect"] = {
+        Code = "$Reflect",
+        Text = "Blocked damage is reflected to your attacker for X turns.",
+        Sources = { { Type = "C", Name = "Reflect" } },
+        Link = "Reflect",
+        Type = "Buff",
+        Stacks = "Duration",
+        Image = "StS2_Icon_Reflect.png",
+        BetweenBehavior = "Decremented",
+        TableOrder = 6,
+    },
+
+    ["Royalties"] = {
+        Code = "$Royalties",
+        Text = "At the end of combat, gain X $Gold.",
+        Sources = { { Type = "C", Name = "Royalties" } },
+        Link = "Royalties",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Royalties.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Seeking Edge"] = {
+        Code = "$Seeking Edge",
+        Text = "Sovereign Blade now hits ALL enemies.",
+        Sources = { { Type = "C", Name = "Seeking Edge" } },
+        Link = "Seeking_Edge",
+        Type = "Buff",
+        Stacks = "Does not stack",
+        Image = "StS2_Icon_SeekingEdge.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Spectrum Shift"] = {
+        Code = "$Spectrum Shift",
+        Text = "At the start of your turn, add X random Colorless cards into your Hand.",
+        Sources = { { Type = "C", Name = "Spectrum Shift" } },
+        Link = "Spectrum_Shift",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_SpectrumShift.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Star Next Turn"] = {
+        Code = "$Star Next Turn",
+        Text = "Gain X @ST next turn.",
+        Sources = {
+            { Type = "C", Name = "Convergence" },
+            { Type = "C", Name = "Hidden Cache" },
+        },
+        Link = "Buffs#Star_Next_Turn",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_StarNextTurn.png",
+        BetweenBehavior = "Consumed",
+        TableOrder = 6,
+    },
+
+    ["Sword Sage"] = {
+        Code = "$Sword Sage",
+        Text = "Sovereign Blade gains $Replay X.",
+        Sources = { { Type = "C", Name = "Sword Sage" } },
+        Link = "Sword_Sage",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_SwordSage.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["The Sealed Throne"] = {
+        Code = "$The Sealed Throne",
+        Text = "Whenever you play a card, gain 1 @ST.",
+        Sources = { { Type = "C", Name = "The Sealed Throne" } },
+        Link = "The_Sealed_Throne",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_TheSealedThrone.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Tyranny"] = {
+        Code = "$Tyranny",
+        Text = "At the start of your turn, draw X cards and $Exhaust X cards from your Hand.",
+        Sources = { { Type = "C", Name = "Tyranny" } },
+        Link = "Tyranny",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_Tyranny.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+
+    ["Void Form"] = {
+        Code = "$Void Form",
+        Text = "The first X cards you play each turn are free to play.",
+        Sources = { { Type = "C", Name = "Void Form" } },
+        Link = "Void_Form",
+        Type = "Buff",
+        Stacks = "Intensity",
+        Image = "StS2_Icon_VoidForm.png",
+        BetweenBehavior = "Permanent",
+        TableOrder = 6,
+    },
+}
+
+local formatted = {}
+for name, power in pairs(all_data) do
+	power.EditLink = "Module:Powers/StS2_data/Regent"
+	formatted[name] = power
+end
+
+return formatted

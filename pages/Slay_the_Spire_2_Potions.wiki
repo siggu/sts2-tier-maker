@@ -1,0 +1,176 @@
+{{Sequel Disambiguation}}
+{{Ambox
+| color = var(--highlight-color-shop)
+| icon = StS2_ClarityExtract.png
+| message = ''This is information about '''Potions''' in Slay the Spire. A full searchable list can be found at [[StS2:Potions List|Potions List (Slay the Spire 2)]].''
+}} {{#setmainimage:StS2_ClarityExtract.png|quiet}} {{Beta content}}
+Potions are single-use consumables that persist across floors.
+{{TOC right|3}}
+Most potions provide a temporary boost that can only be used in a single encounter, and thus can only be used in combat. The only potions that can be used outside of combat are: {{P2|Ambergris}}, {{P2|Entropic Brew}}, {{P2|Foul Potion}} (only when used against the {{2|Merchant}}), {{P2|Fruit Juice}}, and {{P2|Blood Potion}} (Ironclad only).
+
+Potions are stored in Potion Slots, of which you start with 3 ({{Asc2|4|2}}). The only ways to increase the amount of slots you have is to obtain {{R2|Potion Belt}}, {{R2|Alchemical Coffer}}, or {{R2|Phial Holster}}.
+
+Using a potion does not cost {{KW2|Energy}} and does not count as playing a card.
+
+Some potions are exclusive to a single character. Each character has 3 unique potions, with one for each rarity.
+{| class="wikitable"
+|+
+!Character
+!Potions
+|-
+|Ironclad
+|{{P2|Blood Potion}}, {{P2|Ashwater}}, {{P2|Soldier's Stew}}
+|-
+|Silent
+|{{P2|Poison Potion}}, {{P2|Cunning Potion}}, {{P2|Ghost in a Jar}}
+|-
+|Regent
+|{{P2|Star Potion}}, {{P2|King's Courage}}, {{P2|Cosmic Concoction}}
+|-
+|Necrobinder
+|{{P2|Potion of Doom}}, {{P2|Bone Brew}}, {{P2|Pot of Ghouls}}
+|-
+|Defect
+|{{P2|Focus Potion}}, {{P2|Potion of Capacity}}, {{P2|Essence of Darkness}}
+|}
+
+Some potions were renamed in Slay the Spire 2 but are otherwise identical to a potion in Slay the Spire.
+{| class="wikitable"
+|+
+! Original Potion
+! Renamed Potion
+|-
+|{{P|Cultist Potion}}
+|{{P2|Mazaleth's Gift}}
+|-
+|{{P|Elixir}}
+|{{P2|Ashwater}}
+|-
+|{{P|Explosive Potion}}
+|{{P2|Explosive Ampoule}}
+|-
+|{{P|Fear Potion}}
+|{{P2|Vulnerable Potion}}
+|-
+|{{P|Duplication Potion}}
+|{{P2|Duplicator}}
+|}
+
+== Potion Rarity ==
+In most cases, including playing {{C2|Alchemize}}, the rarity chances for obtaining potions are:
+{| class="wikitable"
+|Common Potion
+|65%
+|-
+|Uncommon Potion
+|25%
+|-
+|Rare Potion
+|10%
+|}
+
+== Sources ==
+Potions may be dropped as a reward after combat. The '''default chance''' of a potion dropping is '''40%''' at the start of a run.
+
+If a potion drops, the chance '''decreases''' by '''10%'''. If a potion doesn't drop, the chance '''increases''' by '''10%.''' 
+* With {{R2|White Beast Statue}}, a potion will always drop after combat. This does '''not''' decrease the drop chances which is relevant in cases where you trade the relic for another later in the run.
+* {{2|Elites}} have an '''increased''' chance of obtaining a potion by '''12.5%.''' 
+
+=== Cards ===
+* Using the card {{C2|Alchemize}} creates 1 random potion.
+
+=== Relics ===
+* Obtaining the {{R2|Alchemical Coffer}} from {{KW2|Orobas}} gives you 4 extra potion slots, each filled with a random potion.
+* Obtaining the {{R2|Lost Coffer}} from {{KW2|Neow}} gives you a potion as well as a card reward.
+* Obtaining the {{R2|Neow's Sacrifice}} from {{KW2|Neow}} gives you {{P2|Ambergris}}.
+* Obtaining the {{R2|Phial Holster}}  from {{KW2|Neow}} gives you an extra potion slot as well as 2 potions.
+* Obtaining the {{R2|Delicate Frond}} from {{KW2|Nonupeipe}} fills each empty potion slot with a random potion at the beginning of combat.
+* {{R2|Cauldron}} gives you 5 random potions.
+* {{R2|Tiny Mailbox}} gives a random potion every time you Rest at a {{2|Rest Site}}.
+* {{R2|Petrified Toad}} gives you one {{P2|Potion-Shaped Rock}} at the beginning of combat.
+
+=== Events ===
+* {{E2|Wellspring}} offers you 1 random potion.
+* {{E2|Whispering Hollow}} offers you 2 random potion.
+* {{E2|Drowning Beacon}} offers you {{P2|Glowwater Potion}}.
+* {{E2|Potion Courier}} offers you 1 random potion or 3 {{P|Foul Potion|Foul Potions|2}}.
+* {{E2|Endless Conveyor}} can offer you random potions.
+* {{E2|Punch Off}} offers you 1 random potion.
+* {{E2|Battleworn Dummy}} offers you 1 random potion.
+* {{E2|Crystal Sphere}} can give up to 2 common potions and 1 rare potion.
+* {{E2|The Legends Were True}} offers you 1 random potion.
+* {{E2|War Historian, Repy}} offers you 2 random potions.
+
+=== Other ===
+* {{P2|Entropic Brew}} fills all your empty potion slots, including its slot, with random potions.
+* The {{2|Merchant}} always offers 3 potions (more can be bought with {{R2|The Courier}}).
+
+== Exceptions ==
+{{C2|Alchemize}} and {{P2|Entropic Brew}} cannot create the following potions during combat to disincentivize stalling fights:
+* {{P2|Fairy in a Bottle}}
+* {{P2|Fruit Juice}}
+* {{P2|Regen Potion}}
+However, {{P2|Entropic Brew}} can create these potions when used outside of combat.
+
+== Unlocking ==
+{| class="wikitable"
+|+
+! Epoch
+! Condition
+! Potions
+|-
+
+|{{2|Timeline#The Calm|The Calm}}
+|Unlocked by accumulating 6800 total {{2|Score|score}}.
+|{{P2|Powdered Demise}}, {{P2|Touch of Insanity}}, {{P2|Ship in a Bottle}}
+
+|-
+|{{2|Timeline#Open|Open}}
+|Unlocked by accumulating 1450 total {{2|Score|score}}.
+|{{P2|Beetle Juice}}, {{P2|Mazaleth's Gift}}, {{P2|Droplet of Precognition}}
+
+|-
+|{{2|Timeline#The Pact|The Pact}}
+|Unlocked by beating {{2|Acts#Act 3|Act 3}} with the {{KW2|Ironclad}}.
+|{{P2|Blood Potion}}, {{P2|Ashwater}}, {{P2|Soldier's Stew}}
+
+|-
+|{{2|Timeline#Trophies|Trophies}}
+|Unlocked by beating {{2|Acts#Act 3|Act 3}} with the {{KW2|Silent}}.
+|{{P2|Poison Potion}}, {{P2|Cunning Potion}}, {{P2|Ghost in a Jar}}
+
+|-
+|{{2|Timeline#Resolving Bugs|Resolving Bugs}}
+|Unlocked by beating {{2|Acts#Act 3|Act 3}} with the {{KW2|Defect}}.
+|{{P2|Focus Potion}}, {{P2|Potion of Capacity}}, {{P2|Essence of Darkness}}
+
+|-
+|{{2|Timeline#Grand Strategy|Grand Strategy}}
+|Unlocked by beating {{2|Acts#Act 3|Act 3}} with the {{KW2|Regent}}.
+|{{P2|Star Potion}}, {{P2|King's Courage}}, {{P2|Cosmic Concoction}}
+
+|-
+|{{2|Timeline#Spireborn|Spireborn}}
+|Unlocked by beating {{2|Acts#Act 3|Act 3}} with the {{KW2|Necrobinder}}.
+|{{P2|Potion of Doom}}, {{P2|Bone Brew}}, {{P2|Pot of Ghouls}}
+
+|}
+
+== Interactions ==
+=== Synergies ===
+* {{R2|Reptile Trinket}} gives 3 temporary {{BD2|Strength}} when using a potion.
+* {{R2|The Courier}} makes it so the {{2|Merchant}} will never run out of potions.
+
+=== Neutral ===
+* {{R2|Belt Buckle}} gives 2 {{BD2|Dexterity}} while you have no potions.
+
+=== Anti-Synergies ===
+* Obtaining {{R2|Sozu}} from {{KW2|Darv}} prevents you from obtaining any potions. Any potions you had before picking this up will still be kept.
+
+== Update History ==
+{{Update History Table/start}} 
+{{Update History Table/row|v0.108.0|* White Beast Statue relic no longer decreases your normal potion odds when it guarantees getting potion rewards to prevent you never rolling potions again if it gets removed mid-run.}}
+{{Update History Table/row|v0.107.1|* Fixed a bug where the potion odds would increase after getting a potion from an Elite fight.}}
+{{Update History Table/end}}
+
+[[Category:Slay the Spire 2 Content]]
