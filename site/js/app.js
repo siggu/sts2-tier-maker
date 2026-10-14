@@ -14,6 +14,8 @@ const app = document.getElementById('app');
 let db = null;
 let cleanup = [];
 
+let lastPath = null;
+
 function route() {
   closeDetail();
   cleanup.forEach(fn => fn());
@@ -23,10 +25,14 @@ function route() {
   const [path, query = ''] = raw.split('?');
   const params = new URLSearchParams(query);
   const parts = path.split('/').filter(Boolean);
+  // 다른 화면으로 옮길 때는 맨 위에서 시작한다.
+  if (path !== lastPath) { window.scrollTo(0, 0); lastPath = path; }
 
   setNav(parts[0] === 'balance' ? 'balance' : 'tier');
 
   if (parts[0] === 'tier' && parts[1]) return viewTier(parts[1], params.get('s'));
+  if (parts[0] === 'c' && parts[1]) return viewCategory('tier', parts[1]);
+  if (parts[0] === 'balance' && parts[1] === 'c' && parts[2]) return viewCategory('balance', parts[2]);
   if (parts[0] === 'balance' && parts[1] && parts[2] === 'results') return viewResults(parts[1]);
   if (parts[0] === 'balance' && parts[1]) return viewBalance(parts[1]);
   return viewHome(parts[0] === 'balance' ? 'balance' : 'tier');
@@ -42,7 +48,7 @@ function setNav(active) {
 
 function render(...nodes) {
   // 조건부 조각(cond && h(...))이 false·undefined·0 이 되면 글자로 찍히지 않게 거른다.
-  app.replaceChildren(...nodes.filter(n => n instanceof Node || (typeof n === 'string' && n)));
+  app.replaceChildren(...nodes.flat(Infinity).filter(n => n instanceof Node || (typeof n === 'string' && n)));
   app.focus({ preventScroll: true });
 }
 
@@ -55,74 +61,189 @@ function notFound() {
 
 // ---------------------------------------------------------------- 홈
 
-function viewHome(mode) {
-  const isTier = mode === 'tier';
-  const hero = h('section', { class: 'hero' },
-    h('p', { class: 'eyebrow' }, 'Slay the Spire 2 · 비공식 팬 사이트'),
-    h('h1', {}, isTier ? '첨탑의 티어 메이커' : '첨탑의 밸런스 투표'),
-    h('p', { class: 'lead' }, isTier
-      ? '캐릭터, 카드, 유물, 포션, 고대의 존재, 적까지 끌어다 놓아 나만의 티어 리스트를 만드세요. 이미지로 저장하거나 링크로 공유할 수 있습니다.'
-      : '각 요소를 너프 필요 · 적당함 · 버프 필요 중 하나로 분류하세요. 모두의 표가 모여 무엇이 사기이고 무엇이 약한지 비율로 보여 줍니다.'),
+const CATEGORY_BLURB = {
+  characters: '다섯 캐릭터 중 누가 가장 강할까요?',
+  cards: '캐릭터별 공격 · 스킬 · 파워 카드',
+  curses: '덱에 들어오면 가장 괴로운 저주는?',
+  relics: '희귀도별 · 고대의 존재별 · 캐릭터 전용 유물',
+  potions: '희귀도별 · 캐릭터 전용 포션',
+  enchantments: '카드에 붙는 인챈트 효과',
+  ancients: '막 시작마다 만나 축복을 주는 존재',
+  monsters: '막별 일반 전투 상대',
+  elites: '막별 엘리트 전투 상대',
+  bosses: '막별 보스',
+};
+
+const MODES = {
+  tier: {
+    base: '#/',
+    title: '티어 메이커',
+    icon: '🏆',
+    lead: '끌어다 놓아 나만의 티어 리스트를 만들고, 이미지로 저장하거나 링크로 공유하세요.',
+    href: t => `#/tier/${t.id}`,
+    cat: c => `#/c/${c.id}`,
+  },
+  balance: {
+    base: '#/balance',
+    title: '밸런스 투표',
+    icon: '⚖️',
+    lead: '사기인지, 적당한지, 약한지 골라 주세요. 모두의 표가 모여 비율로 보입니다.',
+    href: t => `#/balance/${t.id}`,
+    cat: c => `#/balance/c/${c.id}`,
+  },
+};
+
+const summaryFor = (mode, t) => (mode === 'tier' ? savedSummary(t) : balanceSummary(t));
+
+// 카테고리나 템플릿을 대표하는 이미지 몇 장 (겹치지 않는 고정 크기 틀 안에 배치)
+function thumbs(items, tileKind, n = 4) {
+  const pics = items.filter(i => i.img).slice(0, n);
+  return h('div', { class: `thumbs kind-${tileKind} n${pics.length}`, 'aria-hidden': 'true' },
+    pics.map(i => h('img', { src: i.img, alt: '', loading: 'lazy', decoding: 'async' })));
+}
+
+function progressBar(done, total) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  return h('div', { class: 'pbar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': `${done}/${total} 완료` },
+    h('span', { style: { width: `${pct}%` } }));
+}
+
+function crumbs(mode, ...items) {
+  const m = MODES[mode];
+  return h('nav', { class: 'crumbs', 'aria-label': '경로' },
+    h('a', { href: m.base }, m.title),
+    items.map(([label, href]) => [h('span', { class: 'sep', 'aria-hidden': 'true' }, '›'), href ? h('a', { href }, label) : h('span', { 'aria-current': 'page' }, label)]),
   );
+}
 
-  const sections = db.categories.map(cat => {
+function modeSwitch(mode) {
+  return h('div', { class: 'modes' }, Object.entries(MODES).map(([key, m]) => h('a', {
+    class: `mode-card${key === mode ? ' on' : ''}`, href: m.base, 'aria-current': key === mode ? 'page' : null,
+  },
+    h('span', { class: 'mode-icon', 'aria-hidden': 'true' }, m.icon),
+    h('span', { class: 'mode-text' },
+      h('strong', {}, m.title),
+      h('span', {}, m.lead)),
+  )));
+}
+
+function viewHome(mode) {
+  const m = MODES[mode];
+
+  // 이어서 하기: 진행 중인 묶음 (최근 것 먼저)
+  const started = db.templates
+    .map(t => ({ t, s: summaryFor(mode, t) }))
+    .filter(x => x.s)
+    .sort((a, b) => (b.s.updatedAt || 0) - (a.s.updatedAt || 0) || b.s.placed - a.s.placed)
+    .slice(0, 6);
+
+  const catCards = db.categories.map(cat => {
     const templates = db.templates.filter(t => t.category.id === cat.id);
-    const preview = cat.items.filter(i => i.img).slice(0, 6);
-
-    const chip = t => {
-      const summary = isTier ? savedSummary(t) : balanceSummary(t);
-      const color = t.group?.color;
-      return h('a', {
-        class: `tpl${summary ? ' started' : ''}`,
-        href: isTier ? `#/tier/${t.id}` : `#/balance/${t.id}`,
-        style: color ? { '--accent': color } : null,
-        title: t.title,
-      },
-        h('span', { class: 'tpl-name' }, t.parts.length && t.section === t.group?.value && t.parts.length === 1 ? '전체' : t.label),
-        h('span', { class: 'tpl-meta' }, summary ? `${summary.placed}/${t.items.length}` : t.items.length),
-      );
-    };
-
-    // section 별로 줄을 나눈다: 'all', 그룹 id(카드), 'rarity', 'type', 'group'
-    const sectionOrder = [];
-    const bySection = new Map();
-    const customLabel = new Map();
-    for (const t of templates) {
-      if (!bySection.has(t.section)) { bySection.set(t.section, []); sectionOrder.push(t.section); }
-      bySection.get(t.section).push(t);
-      if (t.sectionLabel) customLabel.set(t.section, t.sectionLabel);
-    }
-    const sectionLabel = sec => {
-      if (customLabel.has(sec)) return customLabel.get(sec);
-      if (sec === 'all') return null;
-      if (sec === 'rarity') return '희귀도별';
-      if (sec === 'type') return '종류별';
-      if (sec === 'group') return `${cat.groupLabel || '캐릭터'}별`;
-      return cat.groups.find(g => g.id === sec)?.name || sec;
-    };
-    const sectionColor = sec => cat.groups.find(g => g.id === sec)?.color;
-
-    const rows = sectionOrder.map(sec => {
-      const label = sectionLabel(sec);
-      return h('div', { class: 'tpl-row' },
-        label && h('span', { class: 'tpl-row-label', style: sectionColor(sec) ? { '--accent': sectionColor(sec) } : null }, label),
-        h('div', { class: 'tpl-list' }, bySection.get(sec).map(chip)),
-      );
-    });
-
-    return h('section', { class: `cat${templates.length > 8 ? ' wide' : ''}` },
-      h('div', { class: 'cat-head' },
-        h('div', { class: `cat-preview tile-${cat.tile}` }, preview.map(i => h('img', { src: i.img, alt: '', loading: 'lazy' }))),
-        h('div', {},
-          h('h2', {}, cat.name),
-          h('p', { class: 'muted' }, `${cat.items.length}개`, templates.length > 1 ? ` · 묶음 ${templates.length}개` : ''),
+    const href = templates.length === 1 ? m.href(templates[0]) : m.cat(cat);
+    const doneCount = templates.filter(t => summaryFor(mode, t)).length;
+    return h('a', { class: 'cat-card', href },
+      thumbs(cat.items, cat.tile, 4),
+      h('div', { class: 'cat-card-body' },
+        h('h3', {}, cat.name),
+        h('p', {}, CATEGORY_BLURB[cat.id] || ''),
+        h('div', { class: 'cat-card-meta' },
+          h('span', {}, `${cat.items.length}개`),
+          templates.length > 1 && h('span', {}, `묶음 ${templates.length}개`),
+          doneCount > 0 && h('span', { class: 'badge-on' }, `진행 중 ${doneCount}`),
         ),
       ),
-      h('div', { class: 'tpl-rows' }, rows),
     );
   });
 
-  render(hero, h('div', { class: 'cats' }, sections));
+  render(
+    h('section', { class: 'hero' },
+      h('p', { class: 'eyebrow' }, 'Slay the Spire 2 · 비공식 팬 사이트'),
+      h('h1', {}, '첨탑의 티어 메이커'),
+      modeSwitch(mode),
+    ),
+    started.length > 0 && h('section', { class: 'block' },
+      h('h2', { class: 'block-title' }, '이어서 하기'),
+      h('div', { class: 'tpl-grid' }, started.map(({ t, s }) => templateCard(mode, t, s, true))),
+    ),
+    h('section', { class: 'block' },
+      h('h2', { class: 'block-title' }, mode === 'tier' ? '무엇의 티어를 매길까요?' : '무엇에 투표할까요?'),
+      h('div', { class: 'cat-grid' }, catCards),
+    ),
+  );
+}
+
+function templateCard(mode, t, summary = summaryFor(mode, t), showCategory = false) {
+  const m = MODES[mode];
+  return h('a', { class: `tpl-card${summary ? ' started' : ''}`, href: m.href(t), style: t.group?.color ? { '--accent': t.group.color } : null },
+    thumbs(t.items, t.tile, 4),
+    h('div', { class: 'tpl-card-body' },
+      h('strong', {}, showCategory ? t.title : (t.parts.length ? t.label : '전체')),
+      h('span', { class: 'tpl-card-meta' }, summary ? `${summary.placed} / ${t.items.length}` : `${t.items.length}개`),
+      summary && progressBar(summary.placed, t.items.length),
+    ),
+  );
+}
+
+// 카테고리 안의 묶음 고르기
+function viewCategory(mode, catId) {
+  const cat = db.categories.find(c => c.id === catId);
+  if (!cat) return notFound();
+  const templates = db.templates.filter(t => t.category.id === cat.id);
+  if (templates.length === 1) { location.replace(MODES[mode].href(templates[0])); return; }
+
+  const order = [];
+  const bySection = new Map();
+  const customLabel = new Map();
+  for (const t of templates) {
+    if (!bySection.has(t.section)) { bySection.set(t.section, []); order.push(t.section); }
+    bySection.get(t.section).push(t);
+    if (t.sectionLabel) customLabel.set(t.section, t.sectionLabel);
+  }
+  const label = sec => {
+    if (customLabel.has(sec)) return customLabel.get(sec);
+    if (sec === 'all') return '한 번에 전부';
+    if (sec === 'rarity') return '희귀도별';
+    if (sec === 'type') return '종류별';
+    if (sec === 'group') return `${cat.groupLabel || '캐릭터'} 전용`;
+    return cat.groups.find(g => g.id === sec)?.name || sec;
+  };
+  const color = sec => cat.groups.find(g => g.id === sec)?.color;
+
+  render(
+    crumbs(mode, [cat.name]),
+    h('header', { class: 'page-head' },
+      h('h1', {}, cat.name),
+      h('p', {}, CATEGORY_BLURB[cat.id] || '', ` · 모두 ${cat.items.length}개를 묶음 ${templates.length}개로 나눴습니다. 하나를 골라 시작하세요.`),
+    ),
+    order.map(sec => h('section', { class: 'block' },
+      h('h2', { class: 'block-title', style: color(sec) ? { '--accent': color(sec) } : null }, label(sec)),
+      h('div', { class: 'tpl-grid' }, bySection.get(sec).map(t => templateCard(mode, t))),
+    )),
+  );
+}
+
+// 보드 화면 위쪽: 경로 + 사용법 안내(한 번 닫으면 다시 안 보임)
+function boardHeader(mode, template) {
+  const cat = template.category;
+  const multi = db.templates.filter(t => t.category.id === cat.id).length > 1;
+  const path = multi
+    ? [[cat.name, MODES[mode].cat(cat)], [template.parts.map(p => p.label).join(' · ') || '전체']]
+    : [[cat.name]];
+  return crumbs(mode, ...path);
+}
+
+const HINT_KEY = 'sts2.hint.v1';
+function usageHint(mode) {
+  try { if (localStorage.getItem(HINT_KEY)) return null; } catch { /* 저장소 없음 */ }
+  const el = h('div', { class: 'hint' },
+    h('div', {},
+      h('strong', {}, '사용법 '),
+      '항목을 원하는 줄로 끌어다 놓으세요. 모바일에서는 항목을 탭한 뒤 놓을 줄을 탭하면 됩니다. ',
+      '항목을 더블클릭(모바일은 탭 후 "자세히")하면 효과와 강화 정보를 볼 수 있습니다.',
+      mode === 'balance' ? ' 놓는 순간 투표되고, 아래로 다시 빼면 취소됩니다.' : ''),
+    h('button', { class: 'btn ghost small', onclick: () => { try { localStorage.setItem(HINT_KEY, '1'); } catch { /* 무시 */ } el.remove(); } }, '알겠어요'),
+  );
+  return el;
 }
 
 function balanceSummary(template) {
@@ -178,16 +299,21 @@ async function viewTier(templateId, shareCode) {
 
     const placed = template.items.length - pool.length;
     render(
-      h('div', { class: 'toolbar' },
-        h('a', { class: 'back', href: '#/' }, '← 템플릿'),
-        title,
+      boardHeader('tier', template),
+      h('div', { class: 'board-head' },
+        h('div', { class: 'board-title' },
+          title,
+          h('div', { class: 'board-progress' },
+            progressBar(placed, template.items.length),
+            h('span', {}, `${placed} / ${template.items.length} 배치`)),
+        ),
         h('div', { class: 'actions' },
-          h('span', { class: 'progress' }, `${placed} / ${template.items.length}`),
           h('button', { class: 'btn', onclick: () => savePng(template, state) }, '이미지 저장'),
           h('button', { class: 'btn', onclick: () => share(template, state) }, '링크 공유'),
           h('button', { class: 'btn ghost', onclick: reset }, '초기화'),
         ),
       ),
+      usageHint('tier'),
       template.category.enemy && h('p', { class: 'help' }, '위협도 기준입니다. S가 가장 위협적인(어려운) 상대입니다.'),
       b,
     );
@@ -232,8 +358,9 @@ async function viewTier(templateId, shareCode) {
 function viewShared(template, shared) {
   const b = board({ template, rows: shared.tiers, readonly: true, onOpen: id => openDetail(template.byId.get(id), template.category, db) });
   render(
+    boardHeader('tier', template),
     h('div', { class: 'banner' },
-      h('p', {}, '공유받은 티어 리스트를 보고 있습니다.'),
+      h('p', {}, '공유받은 티어 리스트를 보고 있습니다. 항목을 누르면 자세히 볼 수 있습니다.'),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', onclick: () => savePng(template, shared) }, '이미지 저장'),
         h('button', { class: 'btn primary', onclick: () => {
@@ -365,16 +492,20 @@ function viewBalance(templateId) {
     statusEl.textContent = syncText;
 
     render(
-      h('div', { class: 'toolbar' },
-        h('a', { class: 'back', href: '#/balance' }, '← 템플릿'),
-        h('h1', { class: 'toolbar-title' }, `${template.title} 밸런스 투표`),
+      boardHeader('balance', template),
+      h('div', { class: 'board-head' },
+        h('div', { class: 'board-title' },
+          h('h1', { class: 'board-h1' }, `${template.title}`),
+          h('div', { class: 'board-progress' },
+            progressBar(placed.size, template.items.length),
+            h('span', {}, `${placed.size} / ${template.items.length} 투표`),
+            statusEl),
+        ),
         h('div', { class: 'actions' },
-          statusEl,
-          h('span', { class: 'progress' }, `${placed.size} / ${template.items.length}`),
-          h('a', { class: 'btn primary', href: `#/balance/${template.id}/results` }, '결과 보기'),
+          h('a', { class: 'btn primary', href: `#/balance/${template.id}/results` }, '모두의 결과 보기'),
         ),
       ),
-      h('p', { class: 'help' }, '아는 것만 골라 끌어다 놓으면 됩니다. 놓는 즉시 투표되고, 다른 줄로 옮기거나 아래로 빼면 표가 바뀌거나 취소됩니다.'),
+      usageHint('balance'),
       b,
     );
   }
@@ -425,11 +556,14 @@ async function viewResults(templateId) {
     const sorted = voted.slice().sort((a, b) => SORTS[sort].score(b.c) - SORTS[sort].score(a.c) || sum(b.c) - sum(a.c));
     const body = layout === 'list' ? listView(sorted) : boardView(sorted);
     render(
-      h('div', { class: 'toolbar' },
-        h('a', { class: 'back', href: `#/balance/${template.id}` }, '← 투표'),
-        h('h1', { class: 'toolbar-title' }, `${template.title} 밸런스 결과`),
+      boardHeader('balance', template),
+      h('div', { class: 'board-head' },
+        h('div', { class: 'board-title' },
+          h('h1', { class: 'board-h1' }, `${template.title} · 모두의 결과`),
+          h('div', { class: 'board-progress' }, h('span', {}, `${voted.length}개 항목 · 총 ${totalVotes}표`)),
+        ),
         h('div', { class: 'actions' },
-          h('span', { class: 'progress' }, `${voted.length}개 항목 · ${totalVotes}표`),
+          h('a', { class: 'btn', href: `#/balance/${template.id}` }, '내 투표로'),
           h('div', { class: 'seg', role: 'group', 'aria-label': '보기 방식' },
             h('button', { class: layout === 'list' ? 'on' : null, onclick: () => { layout = 'list'; draw(); } }, '목록'),
             h('button', { class: layout === 'board' ? 'on' : null, onclick: () => { layout = 'board'; draw(); } }, '보드'),

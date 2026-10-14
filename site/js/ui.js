@@ -18,7 +18,7 @@ export function h(tag, attrs = {}, ...children) {
     else if (k === 'html') el.innerHTML = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(Infinity)) {
     if (c == null || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
@@ -118,7 +118,7 @@ export function toast(msg) {
 // 줄 index -1 은 아래쪽 미배치 영역(pool).
 
 export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorate, readonly = false, poolTitle = '배치하지 않은 항목' }) {
-  const root = h('div', { class: `board${readonly ? ' readonly' : ''}` });
+  const root = h('div', { class: `board kind-${template.tile}${readonly ? ' readonly' : ''}` });
   let selected = null;
   const lookup = id => template.byId.get(id);
 
@@ -198,7 +198,7 @@ export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorat
     const item = lookup(id);
     hint.replaceChildren(
       h('div', { class: 'select-hint-body' }, ...itemDetails(item)),
-      h('div', { class: 'select-hint-help' }, '놓을 줄을 탭하세요 · 키보드 1~', rows.length, ' / 0 = 빼기 / i = 자세히'),
+      h('div', { class: 'select-hint-help' }, '놓을 줄을 누르세요', h('span', { class: 'kbd-only' }, ` · 키보드 1~${rows.length} / 0 = 빼기 / i = 자세히`)),
       h('div', { class: 'select-hint-actions' },
         onOpen && h('button', { class: 'btn small', onclick: () => { const x = selected; select(null); onOpen(x); } }, '자세히'),
         h('button', { class: 'btn ghost small', onclick: () => select(null) }, '취소'),
