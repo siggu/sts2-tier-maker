@@ -1,0 +1,52 @@
+name: 카드 틀 뽑기 (사용자 월드컵 기본 이미지)
+
+# 위키의 카드 원본으로 빈 카드 틀을 만들어 frames-out 브랜치에 올린다 (사이트에는 직접 반영하지 않음).
+on:
+  push:
+    branches: ['wip/**']
+    paths:
+      - 'tools/frames/**'
+      - '.github/workflows/frames.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: frames
+  cancel-in-progress: true
+
+jobs:
+  frames:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+      - run: npm ci
+        working-directory: tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install opencv-python-headless numpy pillow
+      - name: 카드 원본 받기
+        run: node tools/frames/fetch.mjs /tmp/frames-src
+      - name: 글꼴
+        run: |
+          url=$(curl -s "https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700" | grep -o "https://[^)]*" | head -1)
+          curl -sL -o /tmp/gowun.ttf "$url"
+      - name: 틀 만들기
+        run: python3 tools/frames/build.py /tmp/frames-src /tmp/frames-out /tmp/gowun.ttf
+      - name: frames-out 브랜치에 올리기
+        run: |
+          cd /tmp/frames-out
+          git init -q -b frames-out
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "카드 틀 (${GITHUB_SHA::8})"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" frames-out
