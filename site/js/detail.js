@@ -20,11 +20,20 @@ export function openDetail(item, category, db) {
     panel.replaceChildren(
       h('button', { class: 'detail-close', 'aria-label': '닫기', onclick: closeDetail }, '×'),
       h('div', { class: `detail-media kind-${category.tile}` },
-        img ? h('img', { src: img, alt: item.name, onerror: e => { if (showUp) { e.target.src = item.img; } } })
-          : h('div', { class: 'detail-noimg' }, item.name),
-        canUpgrade && h('div', { class: 'seg', role: 'group', 'aria-label': '강화 전/후 보기' },
-          h('button', { class: showUp ? null : 'on', 'aria-pressed': String(!showUp), onclick: () => { showUp = false; render(); } }, '강화 전'),
-          h('button', { class: showUp ? 'on' : null, 'aria-pressed': String(showUp), onclick: () => { showUp = true; render(); } }, '강화 후 ✦'),
+        img ? h('img', {
+          src: img, alt: item.name,
+          class: canUpgrade ? 'flip' : null,
+          title: canUpgrade ? '눌러서 강화 전/후 전환' : null,
+          onclick: canUpgrade ? toggle : null,
+          onerror: e => { if (showUp) { e.target.src = item.img; } },
+        }) : h('div', { class: 'detail-noimg' }, item.name),
+        // 한 버튼을 누를 때마다 강화 전 ↔ 강화 후가 번갈아 바뀐다.
+        canUpgrade && h('button', {
+          class: `upgrade-switch${showUp ? ' on' : ''}`, role: 'switch', 'aria-checked': String(showUp),
+          onclick: toggle,
+        },
+          h('span', { class: 'switch-track', 'aria-hidden': 'true' }, h('span', { class: 'switch-knob' })),
+          h('span', { class: 'switch-label' }, showUp ? '강화 후 ✦' : '강화 전'),
         ),
       ),
       h('div', { class: 'detail-body' },
@@ -39,6 +48,12 @@ export function openDetail(item, category, db) {
         }, '위키에서 보기 ↗'),
       ),
     );
+  }
+
+  function toggle() {
+    showUp = !showUp;
+    render();
+    panel.querySelector('.upgrade-switch')?.focus();
   }
 
   function onKey(e) {
