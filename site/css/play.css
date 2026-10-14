@@ -97,8 +97,9 @@
 }
 .vs-pick:focus-visible { border-color: var(--side); }
 .vs-pick:active { transform: scale(.98); }
-.vs-media { width: 100%; display: grid; place-items: center; height: 280px; }
-.vs-media img { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .6)); pointer-events: none; }
+/* 그리드 칸의 % 높이는 정해지지 않아 큰 원화(캐릭터)가 카드 밖으로 넘쳤다: 플렉스 + 높이 고정으로 칸 안에 맞춘다 */
+.vs-media { width: 100%; height: 280px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.vs-media img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .6)); pointer-events: none; }
 .vs-pair.kind-card .vs-media { height: clamp(220px, 40vh, 330px); }
 .vs-pair.kind-icon .vs-media { height: 128px; }
 .vs-pair.kind-icon .vs-media img { width: 112px; height: 112px; }
