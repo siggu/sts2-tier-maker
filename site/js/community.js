@@ -1046,3 +1046,6 @@ export function detailExtras(item, category, db) { // eslint-disable-line no-unu
   detailCache = { key: item.key, el, at: Date.now() };
   return el;
 }
+
+// 밸런스 투표 화면의 버튼 (갤러리에 밸런스 투표 공개). (account 에이전트가 구현)
+export function balanceActions(template, ctx) { return null; } // eslint-disable-line no-unused-vars

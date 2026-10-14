@@ -623,13 +623,14 @@ function viewVersus(catId, params, ctx) {
     }));
     attachTooltips(list, id => cat.byId.get(id));
     const unrated = items.length - rows.length;
-    target.replaceChildren(
+    // 조건부 조각(cond && h(...))이 false 면 글자 'false' 로 찍히므로 걸러 낸다
+    target.replaceChildren(...[
       h('p', { class: 'vs-rank-status' }, t('vs.rank.summary', { n: rows.length, games })),
       list,
       rows.length > rankShown && h('p', { class: 'vs-more' },
         h('button', { class: 'btn', onclick: () => { rankShown += 50; drawRank(target); } }, t('vs.rank.more', { n: rows.length - rankShown }))),
       h('p', { class: 'help vs-rank-help' }, t('vs.rank.help', { n: FEW }), unrated > 0 ? ` ${t('vs.rank.unrated', { n: unrated })}` : ''),
-    );
+    ].filter(Boolean));
   }
 
   function drawBody() {

@@ -584,6 +584,7 @@ function viewBalance(templateId) {
         h('div', { class: 'actions' },
           submitBtn,
           h('a', { class: 'btn', href: `#/balance/${template.id}/results` }, t('balance.results')),
+          community.balanceActions(template, ctx),
           h('a', { class: 'btn ghost', href: '#/balance/mine' }, t('balance.mine')),
         ),
       ),
