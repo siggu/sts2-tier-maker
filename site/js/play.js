@@ -8,7 +8,10 @@ import { API_BASE, voterId } from './balance.js';
 import { authHeaders, currentUser } from './auth.js';
 import { loadState, DEFAULT_TIERS } from './tierlist.js';
 import { renderPng } from './export.js';
-import { mountWorldCup, hasRunningCup, sizesFor, SIZES } from './worldcup.js';
+import {
+  mountWorldCup, hasRunningCup, upToLabel, MIN_SIZE, cupMetrics, runStats,
+  RANK_FEW, fmtIndex, fmtProgress, enoughCupData, rankOrder,
+} from './worldcup.js';
 import { worldcupSwitch, cupsStrip } from './cups.js';
 
 // ---------------------------------------------------------------- 공용
@@ -238,7 +241,7 @@ function addJudged(catId, key) {
 }
 
 // ---- 표 보내기 (실패하면 대기열에 두고 다시 보낸다) ----
-// 대기열 항목: { category, winner, loser, again? } (경기 표) 또는 { kind: 'cup', category, champion, entrants } (월드컵 결과)
+// 대기열 항목: { category, winner, loser, again? } (경기 표) 또는 { kind: 'cup', category, champion, entrants, matches } (월드컵 결과)
 
 const PENDING_KEY = 'sts2vs.pending';
 let flushTimer = null;
@@ -264,7 +267,7 @@ async function flushVotes() {
       const vote = pending[0];
       const cup = vote.kind === 'cup';
       const body = cup
-        ? { category: vote.category, champion: vote.champion, entrants: vote.entrants }
+        ? { category: vote.category, champion: vote.champion, entrants: vote.entrants, matches: vote.matches }
         : { category: vote.category, winner: vote.winner, loser: vote.loser };
       // 로그인 상태면 서버가 계정으로 센다. 아니면 밸런스 투표와 같은 익명 id.
       if (!currentUser()) body.voter = voterId();
@@ -298,7 +301,7 @@ async function flushVotes() {
 
 if (read(PENDING_KEY, []).length) setTimeout(flushVotes, 2500);
 
-const blankRow = () => ({ rating: 1500, wins: 0, losses: 0, champ: 0, entries: 0 });
+const blankRow = () => ({ rating: 1500, wins: 0, losses: 0, champ: 0, entries: 0, expected: 0, progress: 0, tracked: 0, trackedChamp: 0 });
 
 // 서버 순위는 30초 캐시라 다시 받지 않고, 응답의 새 점수로 받아 둔 순위를 고친다.
 // (같은 쌍을 다시 고른 경우 서버는 승패를 다시 세므로 여기서는 승패를 더하지 않는다.)
@@ -313,14 +316,18 @@ function applyResult(vote, ratings) {
   }
 }
 
-// 월드컵 결과는 보내자마자 받아 둔 순위에도 더한다.
-function applyCup(category, champion, entrants) {
+// 월드컵 결과는 보내자마자 받아 둔 순위에도 더한다 (서버와 같은 계산: bracket.js 의 runStats).
+function applyCup(category, champion, entrants, matches) {
   const hit = rankingCache.get(category);
   if (!hit) return;
+  const { expected, items } = runStats(entrants, matches);
+  const add = (r, k, v) => { r[k] = (Number(r[k]) || 0) + v; };
   for (const id of entrants) {
     const r = hit.items[id] || (hit.items[id] = blankRow());
-    r.entries = (Number(r.entries) || 0) + 1;
-    if (id === champion) r.champ = (Number(r.champ) || 0) + 1;
+    const won = id === champion ? 1 : 0;
+    add(r, 'entries', 1); add(r, 'champ', won);
+    add(r, 'tracked', 1); add(r, 'trackedChamp', won);
+    add(r, 'expected', expected); add(r, 'progress', items[id].p);
   }
 }
 
@@ -343,7 +350,7 @@ function vsCrumbs(cat) {
 const sessionBadge = () => h('span', { class: 'vs-counter', 'aria-live': 'polite' }, t('vs.session', { n: session.picks }));
 
 function viewVersusHome(ctx) {
-  const cats = ctx.db.categories.filter(c => c.items.length >= SIZES[0]);
+  const cats = ctx.db.categories.filter(c => c.items.length >= MIN_SIZE);
   ctx.render(
     vsCrumbs(null),
     h('header', { class: 'page-head vs-head' },
@@ -357,7 +364,6 @@ function viewVersusHome(ctx) {
       h('h2', { class: 'block-title' }, t('vs.pickCat')),
       h('div', { class: 'cat-grid' }, cats.map(cat => {
         const judged = read(JUDGED_KEY(cat.id), []).length;
-        const top = sizesFor(cat.items.length).pop();
         return h('a', { class: 'cat-card', href: `#/versus/${cat.id}` },
           ctx.thumbs(cat.items, cat.tile, 4),
           h('div', { class: 'cat-card-body' },
@@ -365,7 +371,7 @@ function viewVersusHome(ctx) {
             h('p', {}, question(cat)),
             h('div', { class: 'cat-card-meta' },
               h('span', {}, t('n.items', { n: cat.items.length })),
-              h('span', {}, t('vs.upTo', { size: t('wc.size', { n: top }) })),
+              h('span', {}, upToLabel(cat.items.length)),
               hasRunningCup(`sts2vs.cup.${cat.id}:`) ? h('span', { class: 'badge-on' }, t('vs.running')) : null,
               judged > 0 ? h('span', { class: 'badge-on' }, t('vs.myPicks', { n: judged })) : null),
           ),
@@ -377,7 +383,10 @@ function viewVersusHome(ctx) {
 }
 
 let lastTab = 'play';
-const RANK_SORT_KEY = 'sts2vs.rankSort';
+// 순위 정렬: 'index'(우승 지수) | 'progress'(평균 진출도) | 'elo' | 'titles'(우승 횟수).
+// 고른 적이 없으면 대진 크기를 반영한 판이 충분할 때 우승 지수, 아니면 Elo. (예전 열쇠 sts2vs.rankSort 의 'cup' 은 없어진 정렬이라 새 열쇠를 쓴다)
+const RANK_SORT_KEY = 'sts2vs.rankSort2';
+const RANK_SORTS = ['index', 'progress', 'elo', 'titles'];
 
 function viewVersus(catId, params, ctx) {
   const db = ctx.db;
@@ -387,15 +396,15 @@ function viewVersus(catId, params, ctx) {
   const gid = groups.some(g => g.id === params.get('g')) ? params.get('g') : '';
   const group = groups.find(g => g.id === gid);
   const items = gid ? cat.items.filter(i => inGroup(i, gid)) : cat.items;
-  // 카드는 캐릭터가 다르면 비교가 무의미하므로 '전체'에서는 월드컵 대신 캐릭터를 먼저 고르게 한다.
-  const sameGroup = Boolean(cat.split?.groupFirst) && !gid && groups.length > 1;
+  // 카드도 '전체'(모든 캐릭터)로 할 수 있다. 캐릭터 칩은 범위를 좁히는 거르개.
   const pseudo = { tile: cat.tile, byId: cat.byId };
   const ac = new AbortController();
   ctx.addCleanup(() => ac.abort());
 
   let tab = lastTab;
   let rankShown = 50;
-  let rankSort = read(RANK_SORT_KEY, 'elo') === 'cup' ? 'cup' : 'elo';
+  const savedSort = read(RANK_SORT_KEY, null);
+  let rankSort = RANK_SORTS.includes(savedSort) ? savedSort : null; // null = 데이터를 보고 정한다
   let cup = null;
   ctx.addCleanup(() => cup?.destroy());
 
@@ -457,23 +466,12 @@ function viewVersus(catId, params, ctx) {
     counter.textContent = t('vs.session', { n: session.picks });
   }
 
-  function onFinish({ champion, entrants }) {
-    queueVote({ kind: 'cup', category: cat.id, champion: champion.id, entrants });
-    applyCup(cat.id, champion.id, entrants);
+  function onFinish({ champion, entrants, matches }) {
+    queueVote({ kind: 'cup', category: cat.id, champion: champion.id, entrants, matches });
+    applyCup(cat.id, champion.id, entrants, matches);
   }
 
   function drawPlay() {
-    if (sameGroup) {
-      return h('section', { class: 'empty cup-groups' },
-        h('h2', {}, t('vs.pickGroup')),
-        h('p', {}, t('vs.pickGroupBody')),
-        h('div', { class: 'cup-group-grid' }, groups.map(g => {
-          const n = items.filter(i => inGroup(i, g.id)).length;
-          return h('a', { class: 'vs-chip cup-group', href: groupHref(g.id), style: g.color ? { '--chip': g.color } : null },
-            h('span', {}, g.name), h('small', {}, t('n.items', { n })));
-        })),
-      );
-    }
     cup = mountWorldCup({
       storeKey: CUP_KEY(cat.id, gid),
       title: [t('vs.catTitle', { cat: cat.name }), group?.name].filter(Boolean).join(' · '),
@@ -506,72 +504,96 @@ function viewVersus(catId, params, ctx) {
     }
     if (ac.signal.aborted || tab !== 'rank' || !target.isConnected) return;
     const num = v => Number(v) || 0;
-    const rows = items
+    const all = items
       .map(item => ({ item, r: data[item.id] }))
       .filter(x => x.r && (num(x.r.wins) + num(x.r.losses) + num(x.r.entries)) > 0)
-      .map(x => {
-        const champ = num(x.r.champ), entries = num(x.r.entries);
-        return {
-          item: x.item, rating: Number(x.r.rating) || 1500, w: num(x.r.wins), l: num(x.r.losses),
-          champ, entries, cupRate: entries ? champ / entries : -1,
-        };
-      });
-    if (rankSort === 'cup') rows.sort((a, b) => b.cupRate - a.cupRate || b.champ - a.champ || b.entries - a.entries || b.rating - a.rating);
-    else rows.sort((a, b) => b.rating - a.rating || b.w - a.w || b.champ - a.champ);
-    if (!rows.length) {
+      .map(x => ({
+        item: x.item, rating: Number(x.r.rating) || 1500, w: num(x.r.wins), l: num(x.r.losses),
+        champ: num(x.r.champ), entries: num(x.r.entries), expected: num(x.r.expected), m: cupMetrics(x.r),
+      }));
+    if (!all.length) {
       target.replaceChildren(h('div', { class: 'empty' },
         h('p', {}, t('vs.rank.empty')),
         h('p', {}, h('button', { class: 'btn primary', onclick: () => setTab('play') }, t('vs.tab.play')))));
       return;
     }
-    const games = rows.reduce((n, r) => n + r.w, 0);
-    const cups = rows.reduce((n, r) => n + r.champ, 0);
-    const list = h('ol', { class: 'vs-rank' }, rows.slice(0, rankShown).map((r, i) => {
+    // 고른 정렬이 없거나, 지수·진출도인데 그런 판이 하나도 없으면 데이터를 보고 정한다
+    const anyTracked = all.some(r => r.m.tracked > 0);
+    let sort = rankSort;
+    if (!sort || ((sort === 'index' || sort === 'progress') && !anyTracked)) sort = enoughCupData(all) ? 'index' : 'elo';
+
+    const cupSort = sort === 'index' || sort === 'progress';
+    for (const r of all) r.few = sort === 'elo' ? r.w + r.l < RANK_FEW : cupSort ? r.m.tracked < RANK_FEW : r.entries < RANK_FEW;
+    const value = { index: r => r.m.index, progress: r => r.m.progress, elo: r => r.rating, titles: r => r.champ }[sort];
+    const tie = (a, b) => b.champ - a.champ || b.rating - a.rating || b.w - a.w || b.entries - a.entries;
+    const { top, few } = rankOrder(all, value, tie, cupSort);
+    const rows = [...top, ...few];
+    const maxIndex = Math.max(1, ...top.map(r => r.m.index ?? 0));
+    const maxChamp = Math.max(1, ...rows.map(r => r.champ));
+
+    const games = all.reduce((n, r) => n + r.w, 0);
+    const cups = all.reduce((n, r) => n + r.champ, 0); // 판마다 우승은 하나
+    const rowEl = (r, i) => {
       const n = r.w + r.l;
       const pctW = n ? Math.round((r.w / n) * 100) : 0;
       const pctC = r.entries ? Math.round((r.champ / r.entries) * 100) : 0;
-      const few = rankSort === 'cup' ? r.entries < FEW : n < FEW;
       const cupText = r.entries ? t('vs.rank.cup', { c: r.champ, e: r.entries, p: pctC }) : t('vs.rank.noCup');
+      const bar = sort === 'index' ? (r.m.index ?? 0) / maxIndex * 100
+        : sort === 'progress' ? (r.m.progress ?? 0) * 100
+          : sort === 'titles' ? r.champ / maxChamp * 100 : pctW;
+      const shown = sort === 'index' ? fmtIndex(r.m.index) : sort === 'progress' ? fmtProgress(r.m.progress)
+        : sort === 'titles' ? String(r.champ) : String(Math.round(r.rating));
+      const stats = r.m.tracked > 0 ? t('wc.rank.stats', { i: fmtIndex(r.m.index), p: fmtProgress(r.m.progress) }) : null;
       return h('li', {
-        class: `vs-rank-row${few ? ' few' : ''}`, tabindex: '0', role: 'button',
-        'aria-label': `${i + 1}. ${r.item.name} · ${t('vs.rank.wl', { w: r.w, l: r.l })} · ${cupText}`,
+        class: `vs-rank-row${r.few ? ' few' : ''}`, tabindex: '0', role: 'button',
+        'aria-label': [`${i + 1}. ${r.item.name}`, t('vs.rank.wl', { w: r.w, l: r.l }), cupText, stats].filter(Boolean).join(' · '),
         onclick: () => openDetail(r.item, cat, db),
         onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.item, cat, db); } },
       },
-        h('span', { class: `vs-rank-no${i < 3 ? ` top top${i + 1}` : ''}` }, String(i + 1)),
+        h('span', { class: `vs-rank-no${i < 3 && !r.few ? ` top top${i + 1}` : ''}` }, String(i + 1)),
         tile(r.item, pseudo),
         h('span', { class: 'vs-rank-main' },
           h('span', { class: 'vs-rank-name' }, r.item.name,
             !gid && r.item.groupName && r.item.groupName !== cat.name ? h('span', { class: 'result-group' }, r.item.groupName) : null),
-          h('span', { class: `vs-rank-bar${rankSort === 'cup' ? ' is-cup' : ''}`, 'aria-hidden': 'true' },
-            h('span', { style: { width: `${rankSort === 'cup' ? pctC : pctW}%` } })),
+          h('span', { class: `vs-rank-bar${sort !== 'elo' ? ' is-cup' : ''}`, 'aria-hidden': 'true' },
+            h('span', { style: { width: `${Math.max(0, Math.min(100, Math.round(bar)))}%` } })),
           h('span', { class: 'vs-rank-sub' },
             n ? [t('vs.rank.wl', { w: r.w, l: r.l }), ' · ', t('vs.rank.rate', { p: pctW })] : t('vs.rank.noGames'),
             h('br'),
-            h('span', { class: `vs-rank-cup${r.champ ? ' has' : ''}` }, r.champ ? '🏆 ' : null, cupText))),
-        rankSort === 'cup'
-          ? h('span', { class: 'vs-rank-rating', title: t('vs.rank.cupRate') }, r.entries ? `${pctC}%` : '–')
-          : h('span', { class: 'vs-rank-rating', title: t('vs.rank.rating') }, String(Math.round(r.rating))),
+            h('span', { class: `vs-rank-cup${r.champ ? ' has' : ''}` }, r.champ ? '🏆 ' : null, cupText),
+            stats ? [h('br'), stats] : null)),
+        h('span', {
+          class: `vs-rank-rating${shown === '—' ? ' is-none' : ''}`,
+          title: sort === 'elo' ? t('vs.rank.rating') : t(`wc.rank.${sort}`),
+        }, shown),
       );
-    }));
+    };
+    const visible = rows.slice(0, rankShown);
+    const list = h('ol', { class: 'vs-rank' }, visible.map((r, i) => [
+      cupSort && few.length && r === few[0] ? h('li', { class: 'vs-rank-few-sep', 'aria-hidden': 'true' }, t('wc.rank.fewSep', { n: RANK_FEW })) : null,
+      rowEl(r, i),
+    ]));
     attachTooltips(list, id => cat.byId.get(id));
-    const unrated = items.length - rows.length;
+    const unrated = items.length - all.length;
+    const label = k => (k === 'elo' ? t('vs.rank.sort.elo') : t(`wc.rank.${k}`));
     const sortSeg = h('div', { class: 'seg vs-rank-sort', role: 'group', 'aria-label': t('vs.rank.sort') },
-      ['elo', 'cup'].map(k => h('button', {
-        class: rankSort === k ? 'on' : null, 'aria-pressed': String(rankSort === k),
-        onclick: () => { if (rankSort !== k) { rankSort = k; write(RANK_SORT_KEY, k); drawRank(target); } },
-      }, t(`vs.rank.sort.${k}`))));
+      RANK_SORTS.map(k => h('button', {
+        type: 'button', class: sort === k ? 'on' : null, 'aria-pressed': String(sort === k),
+        onclick: () => { if (sort !== k) { rankSort = k; write(RANK_SORT_KEY, k); drawRank(target); } },
+      }, label(k))));
+    const help = sort === 'elo' ? t('vs.rank.help', { n: RANK_FEW }) : t(`wc.rank.help.${sort}`);
     // 조건부 조각(cond && h(...))이 false 면 글자 'false' 로 찍히므로 걸러 낸다
     target.replaceChildren(...[
       h('div', { class: 'vs-rank-head' },
         h('p', { class: 'vs-rank-status' },
-          t('vs.rank.summary', { n: rows.length, games }), cups > 0 ? ` · ${t('vs.rank.cups', { n: cups })}` : ''),
+          t('vs.rank.summary', { n: all.length, games }), cups > 0 ? ` · ${t('vs.rank.cups', { n: cups })}` : ''),
         sortSeg),
       list,
-      rows.length > rankShown && h('p', { class: 'vs-more' },
-        h('button', { class: 'btn', onclick: () => { rankShown += 50; drawRank(target); } }, t('vs.rank.more', { n: rows.length - rankShown }))),
+      rows.length > rankShown ? h('p', { class: 'vs-more' },
+        h('button', { class: 'btn', onclick: () => { rankShown += 50; drawRank(target); } }, t('vs.rank.more', { n: rows.length - rankShown }))) : null,
       h('p', { class: 'help vs-rank-help' },
-        t(rankSort === 'cup' ? 'vs.rank.helpCup' : 'vs.rank.help', { n: FEW }),
+        help,
+        cupSort ? ` ${t('wc.rank.few', { n: RANK_FEW })} ${t('wc.rank.since')}` : '',
         unrated > 0 ? ` ${t('vs.rank.unrated', { n: unrated })}` : ''),
     ].filter(Boolean));
   }

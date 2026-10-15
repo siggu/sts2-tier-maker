@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {
   templateCategory, tierScore, aggregateStates, finalizeAggregate,
   validateVersus, normalizePair, eloDelta, ELO_K,
-  validateTournament, mergeRanking, BRACKET_SIZES,
+  validateTournament, tournamentError, mergeRanking, categorySizes, TOURNAMENT_MAX, handlePlay,
 } from '../src/play.js';
+import { makeD1, playBracket } from './helpers.js';
 
 const keys = new Set(['cards/bash', 'cards/strike', 'cards/defend', 'relics/anchor', 'relics/vajra']);
 const voter = 'abcdef0123456789';
@@ -67,40 +68,112 @@ test('대결 입력 검사', () => {
 });
 
 test('월드컵 결과 입력 검사', () => {
-  const many = new Set([...keys, ...Array.from({ length: 70 }, (_, i) => `relics/r${i}`)]);
-  const ok = { category: 'cards', champion: 'bash', entrants: ['strike', 'bash', 'defend', 'zap'], voter };
   const k4 = new Set([...keys, 'cards/zap']);
+  const cup = (entrants, pick) => ({ category: 'cards', voter, ...playBracket(entrants, pick) });
+  const ok = cup(['strike', 'bash', 'defend', 'zap'], (a, b) => (b === 'bash' ? b : a)); // bash 우승
+  assert.equal(ok.champion, 'bash');
   assert.equal(validateTournament(ok, k4), null);
   assert.equal(validateTournament({ ...ok, voter: undefined }, k4, true), null);
   assert.equal(validateTournament(null, k4), 'body');
+  assert.equal(validateTournament([], k4), 'body');
   assert.equal(validateTournament({ ...ok, category: 'potions' }, k4), 'category');
   assert.equal(validateTournament({ ...ok, entrants: 'bash' }, k4), 'entrants');
-  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend'] }, k4), 'entrants');   // 3강은 없다
   assert.equal(validateTournament({ ...ok, entrants: [] }, k4), 'entrants');
+  assert.equal(validateTournament({ ...ok, entrants: ['bash'] }, k4), 'entrants');
+  // 3개: 이제 예선 1경기 + 결승 (2의 거듭제곱이 아니어도 된다)
+  assert.equal(validateTournament(cup(['bash', 'strike', 'defend']), k4), null);
+  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend'] }, k4), 'matches');
+  // 그 카테고리의 항목 수(cards 4개)보다 많으면 안 된다
+  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 'zap', 'x'] }, k4), 'entrants');
   assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 'anchor'] }, k4), 'item'); // 다른 카테고리
   assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 3] }, k4), 'item');
   assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 'bash'] }, k4), 'duplicate');
+  assert.equal(validateTournament({ ...ok, matches: undefined }, k4), 'matches'); // 예전 화면(경기 결과 없이)은 받지 않는다
+  assert.equal(validateTournament({ ...ok, matches: ok.matches.slice(1) }, k4), 'matches');
+  assert.deepEqual(tournamentError({ ...ok, matches: [['strike', 'bash'], ['defend', 'zap'], ['bash', 'defend']] }, k4), { reason: 'match', index: 2 });
   assert.equal(validateTournament({ ...ok, champion: 'nope' }, k4), 'champion');
   assert.equal(validateTournament({ ...ok, champion: ['bash'] }, k4), 'champion');
   assert.equal(validateTournament({ ...ok, voter: 'u_0123456789abcdef' }, k4), 'voter');
-  assert.deepEqual(BRACKET_SIZES, [4, 8, 16, 32, 64]);
-  for (const n of [8, 16, 32, 64]) {
-    const entrants = Array.from({ length: n }, (_, i) => `r${i}`);
-    assert.equal(validateTournament({ category: 'relics', champion: 'r0', entrants, voter }, many), null);
+
+  // 큰 카테고리: 5·6·12·37·64·128·300(전체) 는 되고, 항목 수를 넘거나 512 를 넘으면 안 된다
+  const many = new Set([...keys, ...Array.from({ length: 600 }, (_, i) => `relics/r${i}`)]);
+  const relics = n => Array.from({ length: n }, (_, i) => `r${i}`);
+  for (const n of [5, 6, 12, 37, 64, 128, 300, 512]) {
+    assert.equal(validateTournament({ category: 'relics', voter, ...playBracket(relics(n)) }, many), null, `n=${n}`);
   }
-  const e128 = Array.from({ length: 70 }, (_, i) => `r${i}`);
-  assert.equal(validateTournament({ category: 'relics', champion: 'r0', entrants: e128, voter }, many), 'entrants');
+  assert.equal(TOURNAMENT_MAX, 512);
+  assert.equal(validateTournament({ category: 'relics', voter, ...playBracket(relics(513)) }, many), 'entrants');
+  assert.equal(categorySizes(many).counts.get('relics'), 602);
+  const few = new Set([...keys, ...Array.from({ length: 10 }, (_, i) => `relics/r${i}`)]); // relics 12개
+  assert.equal(validateTournament({ category: 'relics', voter, ...playBracket(relics(10)) }, few), null);
+  assert.equal(validateTournament({ category: 'relics', voter, ...playBracket(relics(13)) }, few), 'entrants');
 });
 
 test('순위: Elo 와 월드컵 수치를 합친다', () => {
   const items = mergeRanking(
     [{ item: 'bash', rating: 1512.34, wins: 1, losses: 0 }, { item: 'gone', rating: 1400, wins: 0, losses: 1 }],
-    [{ item: 'bash', champ: 2, entries: 5 }, { item: 'defend', champ: 0, entries: 1 }, { item: 'gone', champ: 1, entries: 1 }],
+    [
+      { item: 'bash', champ: 2, entries: 5, expected: 0.4166666, progress: 1.3333333, tracked: 2, tracked_champ: 1 },
+      { item: 'defend', champ: 0, entries: 1, expected: 0, progress: 0, tracked: 0, tracked_champ: 0 },
+      { item: 'gone', champ: 1, entries: 1, expected: 0.25, progress: 1, tracked: 1, tracked_champ: 1 },
+    ],
     'cards', keys);
   assert.deepEqual(items, {
-    bash: { rating: 1512.3, wins: 1, losses: 0, champ: 2, entries: 5 },
-    defend: { rating: 1500, wins: 0, losses: 0, champ: 0, entries: 1 },
+    bash: { rating: 1512.3, wins: 1, losses: 0, champ: 2, entries: 5, expected: 0.4167, progress: 1.3333, tracked: 2, trackedChamp: 1 },
+    defend: { rating: 1500, wins: 0, losses: 0, champ: 0, entries: 1, expected: 0, progress: 0, tracked: 0, trackedChamp: 0 },
   });
+});
+
+test('월드컵 결과 저장: 대진 크기를 반영한 수치를 서버가 계산한다 (D1 대역)', async t => {
+  const DB = await makeD1();
+  if (!DB) return t.skip('node:sqlite 없음');
+  const k = new Set(['potions/p1', 'potions/p2', 'potions/p3', 'potions/p4', 'potions/p5', 'potions/p6']);
+  const env = { DB };
+  const ctx = { waitUntil() {} };
+  const post = async (body, ip = '10.0.0.1') => {
+    const request = new Request('http://x/versus/tournament', { method: 'POST', headers: { 'CF-Connecting-IP': ip }, body: JSON.stringify(body) });
+    const res = await handlePlay(request, env, ctx, { url: new URL(request.url), cors: {}, keys: k });
+    return { status: res.status, body: await res.json() };
+  };
+  const row = id => DB.raw.prepare('SELECT champ, entries, expected, progress, tracked, tracked_champ FROM worldcup_stats WHERE category = ? AND item = ?').get('potions', id);
+  // 예전(0006 전) 기록: tracked 없이 champ·entries 만 있는 행
+  DB.raw.prepare("INSERT INTO worldcup_stats (category, item, champ, entries) VALUES ('potions', 'p3', 4, 9)").run();
+
+  // 5개 전체: 예선 p1>p2, 준결승 p3>p1, p4>p5, 결승 p3>p4
+  const five = { category: 'potions', voter, entrants: ['p1', 'p2', 'p3', 'p4', 'p5'], champion: 'p3',
+    matches: [['p1', 'p2'], ['p3', 'p1'], ['p4', 'p5'], ['p3', 'p4']] };
+  assert.deepEqual(await post(five), { status: 200, body: { ok: true } });
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  const want = { p1: [0, 1 / 3], p2: [0, 0], p3: [1, 1], p4: [0, 2 / 3], p5: [0, 1 / 3] };
+  for (const [id, [champ, progress]] of Object.entries(want)) {
+    const r = row(id);
+    assert.ok(near(r.expected, 0.2), `${id} expected ${r.expected}`);
+    assert.ok(near(r.progress, progress), `${id} progress ${r.progress}`);
+    assert.equal(r.tracked, 1);
+    assert.equal(r.tracked_champ, champ);
+  }
+  assert.deepEqual({ ...row('p3'), expected: 0, progress: 0 }, { champ: 5, entries: 10, expected: 0, progress: 0, tracked: 1, tracked_champ: 1 });
+  assert.equal(row('p6'), undefined);
+
+  // 4강 한 판 더: p3 첫 경기 탈락 → progress 그대로, expected + 1/4
+  const four = { category: 'potions', voter, entrants: ['p3', 'p6', 'p1', 'p2'], champion: 'p6',
+    matches: [['p6', 'p3'], ['p1', 'p2'], ['p6', 'p1']] };
+  assert.deepEqual(await post(four), { status: 200, body: { ok: true } });
+  assert.ok(near(row('p3').expected, 0.2 + 0.25));
+  assert.ok(near(row('p3').progress, 1));
+  assert.equal(row('p3').tracked, 2);
+  assert.ok(near(row('p6').progress, 1));
+  assert.ok(near(row('p1').progress, 1 / 3 + 0.5));
+
+  // 틀린 판은 400 + 이유 (경기 위치)
+  const bad = await post({ ...five, matches: [['p1', 'p2'], ['p2', 'p3'], ['p4', 'p5'], ['p3', 'p4']] });
+  assert.deepEqual(bad, { status: 400, body: { error: 'bad_request', reason: 'match', index: 1 } });
+  assert.deepEqual((await post({ ...five, matches: undefined })).body, { error: 'bad_request', reason: 'matches' });
+  assert.equal(row('p5').tracked, 1); // 바뀌지 않음
+  // IP 당 1분 6판 (이미 2판)
+  const codes = [];
+  for (let i = 0; i < 5; i++) codes.push((await post(five)).status);
+  assert.deepEqual(codes, [200, 200, 200, 200, 429]);
 });
 
 test('쌍 정렬', () => {
@@ -162,9 +235,9 @@ test('e2e: A vs B 투표·재투표·순위·속도 제한', { skip: !E2E && 'PL
     const res = await fetch(`${E2E}/versus/tournament`, { method: 'POST', headers: { 'CF-Connecting-IP': `${ip}9` }, body: JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
   };
-  const four = JSON.parse(keysJson).filter(k => k.startsWith('potions/')).slice(0, 4).map(k => k.slice(8));
-  assert.deepEqual(await cup({ category: 'potions', champion: four[2], entrants: four, voter: me }), { status: 200, body: { ok: true } });
-  assert.deepEqual((await cup({ category: 'potions', champion: 'nope', entrants: four, voter: me })).body, { error: 'bad_request', reason: 'champion' });
+  const five = JSON.parse(keysJson).filter(k => k.startsWith('potions/')).slice(0, 5).map(k => k.slice(8));
+  assert.deepEqual(await cup({ category: 'potions', voter: me, ...playBracket(five) }), { status: 200, body: { ok: true } });
+  assert.deepEqual((await cup({ category: 'potions', voter: me, ...playBracket(five), champion: 'nope' })).body, { error: 'bad_request', reason: 'champion' });
   assert.equal((await fetch(`${E2E}/versus/tournament`)).status, 405);
 
   // 이 IP 로 이미 3번 성공 → 57번 더 되고 그다음부터 429 (분이 바뀌어도 128번이면 한 분에 60번을 넘는다)

@@ -1,6 +1,7 @@
 // 테스트 도우미: 시험용 RSA 키로 구글 ID 토큰 흉내 내기, node:sqlite 로 만든 작은 D1 대역.
 import { readFileSync, readdirSync } from 'node:fs';
 import { bytesToB64url } from '../src/auth.js';
+import { bracketPlan } from '../src/bracket.js';
 
 const RS256 = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
 
@@ -63,4 +64,21 @@ export async function makeD1(migrations = ALL_MIGRATIONS) {
       } catch (err) { db.exec('ROLLBACK'); throw err; }
     },
   };
+}
+
+// 한 판을 규칙대로 치른다: 예선 (0,1), (2,3)… → 본선 [예선 승자…, 부전승…] 을 둘씩. pick(a, b) = 이긴 쪽.
+// (본선 짝은 서버가 따지지 않으므로 화면과 다른 배치여도 된다)
+export function playBracket(entrants, pick = a => a) {
+  const { prelims } = bracketPlan(entrants.length);
+  const matches = [];
+  const duel = (a, b) => { const w = pick(a, b); matches.push([w, w === a ? b : a]); return w; };
+  let round = [];
+  for (let j = 0; j < prelims; j++) round.push(duel(entrants[2 * j], entrants[2 * j + 1]));
+  round.push(...entrants.slice(2 * prelims));
+  while (round.length > 1) {
+    const next = [];
+    for (let i = 0; i < round.length; i += 2) next.push(duel(round[i], round[i + 1]));
+    round = next;
+  }
+  return { champion: round[0], entrants, matches };
 }

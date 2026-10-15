@@ -1,6 +1,6 @@
 // 이상형 월드컵 엔진: 대진(무작위 추첨) → 라운드별 1:1 선택 → 우승.
 // 게임 데이터와 무관하다. 항목은 { id, name, img? } 이면 되고, 보여 줄 덧붙임·자세히 보기·결과 보내기는
-// 부르는 쪽이 콜백으로 넘긴다 (play.js 의 카드·유물 월드컵, 나중에는 사용자가 만든 월드컵).
+// 부르는 쪽이 콜백으로 넘긴다 (play.js 의 카드·유물 월드컵, cups.js 의 사용자 월드컵).
 //
 //   const cup = mountWorldCup({
 //     storeKey: 'sts2vs.cup.cards:ironclad',     // 진행 중인 판을 localStorage 에 두는 열쇠
@@ -19,90 +19,79 @@
 //   });
 //   target.replaceChildren(cup.el);  …  cup.destroy();
 //
-// 판 상태는 { size, entrants: [id...](대진 순서), picks: [이긴 id...](경기 순서), finished, at } 뿐이고
-// 나머지(라운드, 지금 경기, 우승까지의 길)는 bracket() 이 entrants·picks 에서 다시 계산한다.
-// 그래서 되돌리기는 picks.pop(), 이어 하기는 저장본을 읽기만 하면 된다.
+// 대진 크기: 4·8·16…(2의 거듭제곱, 항목 수 이하) 중 무작위 추첨, 또는 '전체'(모든 항목 — 2의 거듭제곱이 아니면
+// 예선·부전승, bracket.js). 판 상태는 { v: 2, size, entrants: [id...](대진 순서), sides: '0101…'(경기마다 고른 쪽),
+// finished, at } 뿐이고 나머지(라운드, 지금 경기, 부전승, 우승까지의 길)는 bracket() 이 다시 계산한다.
+// 그래서 되돌리기는 sides 한 글자 빼기, 이어 하기는 저장본을 읽기만 하면 된다.
 
 import { h, hideTip, toast } from './ui.js';
 import { t } from './i18n.js';
+import {
+  MIN_SIZE, MAX_ENTRANTS, isPow2, plan, sizeOptions, sizesFor, defaultSize, drawEntrants, bracket, sidesFromWinners, matchPairs,
+} from './bracket.js';
 
-export const SIZES = [4, 8, 16, 32, 64];
-const DEFAULT_MAX = 16;
+export { MIN_SIZE, MAX_ENTRANTS, sizeOptions, sizesFor, defaultSize, drawEntrants, bracket };
 const RESUME_FINISHED_MS = 60 * 60 * 1000; // 끝난 판의 우승 화면은 1시간 동안만 다시 보여 준다
+const BYES_SHOWN = 8;                      // 부전승 이름을 이만큼 보여 주고 나머지는 '외 n개'
 
-export const sizesFor = n => SIZES.filter(s => s <= n);
-export function defaultSize(n, preferred) {
-  const ok = sizesFor(n);
-  if (ok.includes(preferred)) return preferred;
-  return ok.filter(s => s <= DEFAULT_MAX).pop() ?? null;
+// 대진 이름: 2의 거듭제곱이면 'n강', 아니면 '전체 n개'
+export const sizeLabel = n => (isPow2(n) ? t('wc.size', { n }) : t('wc.sizeAll', { n }));
+// 고를 수 있는 가장 큰 대진 (목록 카드의 '최대 …')
+export function topSizeLabel(total) {
+  const top = sizesFor(total).pop();
+  return top ? sizeLabel(top) : null;
 }
 
-// ids 에서 size 개를 무작위로 뽑아 섞는다 (Fisher–Yates).
-export function drawEntrants(ids, size, rand = Math.random) {
-  const a = [...new Set(ids)];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a.slice(0, size);
-}
-
-// entrants·picks → 경기 목록과 지금 경기. picks 가 대진과 맞지 않으면 null.
-// matches[i] = { a, b, w?, size(그 라운드의 강), idx(라운드 안 0부터), of(라운드 경기 수) }
-export function bracket(entrants, picks) {
-  if (!Array.isArray(entrants) || !SIZES.includes(entrants.length) || new Set(entrants).size !== entrants.length) return null;
-  if (!Array.isArray(picks) || picks.length > entrants.length - 1) return null;
-  const matches = [];
-  let round = entrants;
-  let p = 0;
-  let current = null;
-  while (round.length > 1) {
-    const next = [];
-    const of = round.length / 2;
-    for (let idx = 0; idx < of; idx++) {
-      const a = round[idx * 2], b = round[idx * 2 + 1];
-      const m = { a, b, size: round.length, idx, of };
-      if (current || p >= picks.length) {
-        // 아직 정해지지 않은 경기: 양쪽이 다 알려진 경우만 의미가 있다
-        current ??= m;
-        matches.push(m);
-        next.push(undefined);
-        continue;
-      }
-      const w = picks[p++];
-      if (w !== a && w !== b) return null;
-      m.w = w;
-      matches.push(m);
-      next.push(w);
-    }
-    round = next;
-  }
-  const done = !current;
-  const final = matches[matches.length - 1];
-  return {
-    matches,
-    current,
-    played: picks.length,
-    total: entrants.length - 1,
-    done,
-    champion: done ? final.w : null,
-    runnerUp: done ? (final.w === final.a ? final.b : final.a) : null,
-  };
-}
-
-// 우승 항목이 라운드마다 이긴 상대: [{ size, opponent }]
+// 우승 항목이 라운드마다 이긴 상대: [{ round, opponent }] (부전승이었으면 맨 앞에 { round: 'pre', bye: true })
 export function roadOf(b, id) {
-  return b.matches.filter(m => m.w === id).map(m => ({ size: m.size, opponent: m.a === id ? m.b : m.a }));
+  const road = b.matches.filter(m => m.w === id).map(m => ({ round: m.round, opponent: m.a === id ? m.b : m.a }));
+  if (b.byes.includes(id)) road.unshift({ round: 'pre', bye: true });
+  return road;
 }
 
-// 라운드 이름: 결승·준결승·8강·16강…
-export function roundName(size) {
-  if (size === 2) return t('wc.round.final');
-  if (size === 4) return t('wc.round.semi');
-  if (size === 8) return t('wc.round.quarter');
-  return t('wc.round.n', { n: size });
+// 라운드 이름: 예선·결승·준결승·8강·16강…
+export function roundName(round) {
+  if (round === 'pre') return t('wc.round.prelim');
+  if (round === 2) return t('wc.round.final');
+  if (round === 4) return t('wc.round.semi');
+  if (round === 8) return t('wc.round.quarter');
+  return t('wc.round.n', { n: round });
 }
-const matchLabel = m => (m.of > 1 ? t('wc.match', { round: roundName(m.size), i: m.idx + 1, of: m.of }) : roundName(m.size));
+const matchLabel = m => (m.of > 1 ? t('wc.match', { round: roundName(m.round), i: m.idx + 1, of: m.of }) : roundName(m.round));
+
+// 목록 카드의 '최대 …': 가장 큰 2의 거듭제곱 대진, 또는 '전체 n개까지'
+export function upToLabel(total) {
+  const opts = sizeOptions(total);
+  const top = opts[opts.length - 1];
+  if (!top) return null;
+  return isPow2(top.n) ? t('wc.upTo', { size: t('wc.size', { n: top.n }) }) : t('wc.upToAll', { n: top.n });
+}
+
+// ---- 순위 화면 공용 (play.js 게임 월드컵, cups.js 사용자 월드컵) ----
+// 수치 정의는 bracket.js 의 cupMetrics. 기록된 판이 RANK_FEW 번 미만인 항목은 흐리게 하고, 지수·진출도 정렬에서는 아래로 모은다.
+export { cupMetrics, runStats } from './bracket.js';
+export const RANK_FEW = 3;
+const ENOUGH_RUNS = 5; // 대진 크기를 반영한 판이 이만큼 모이면 '우승 지수'가 기본 정렬
+
+export function fmtIndex(v) {
+  if (v == null) return '—';
+  return v >= 100 ? String(Math.round(v)) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+export const fmtProgress = v => (v == null ? '—' : `${Math.round(v * 100)}%`);
+
+// 지수를 셀 만큼 판이 모였는가: 판마다 출전 항목의 expected 합은 1 이므로 Σ expected = 판 수
+export const enoughCupData = rows => rows.reduce((s, r) => s + (Number(r.expected) || 0), 0) >= ENOUGH_RUNS - 1e-9;
+
+// 정렬: value(row) 큰 순, null 은 뒤, 같으면 tie. demote 면 few 인 줄을 뒤로 모은다. → { top, few }
+export function rankOrder(rows, value, tie, demote) {
+  const cmp = (a, b) => {
+    const x = value(a), y = value(b);
+    if (x == null || y == null) return x == null && y == null ? tie(a, b) : x == null ? 1 : -1;
+    return y - x || tie(a, b);
+  };
+  if (!demote) return { top: [...rows].sort(cmp), few: [] };
+  return { top: rows.filter(r => !r.few).sort(cmp), few: rows.filter(r => r.few).sort(cmp) };
+}
 
 function readRun(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
@@ -121,7 +110,7 @@ export function hasRunningCup(prefix) {
       const k = localStorage.key(i);
       if (!k || !k.startsWith(prefix)) continue;
       const run = JSON.parse(localStorage.getItem(k));
-      if (run && !run.finished && Array.isArray(run.picks)) return true;
+      if (run && !run.finished && (typeof run.sides === 'string' || Array.isArray(run.picks))) return true;
     }
   } catch { /* 없음 */ }
   return false;
@@ -136,37 +125,46 @@ function preload(items) {
   }
 }
 
+// 저장본 → 지금 형식 { v: 2, size, entrants, sides, finished, at }. 예전 형식(v1: picks = 이긴 id 목록)은 바꿔 읽는다.
+function upgradeRun(run) {
+  if (!run || typeof run !== 'object' || !Array.isArray(run.entrants)) return null;
+  if (run.v === 2) return typeof run.sides === 'string' ? run : null;
+  const sides = sidesFromWinners(run.entrants, run.picks);
+  if (sides === null) return null;
+  return { v: 2, size: run.entrants.length, entrants: run.entrants, sides, finished: Boolean(run.finished), at: run.at };
+}
+
 export function mountWorldCup(opts) {
   const { storeKey, items, kind = 'custom' } = opts;
   const byId = new Map(items.map(i => [i.id, i]));
-  const sizes = sizesFor(items.length);
+  const options = sizeOptions(items.length);
   const el = h('div', { class: 'cup' });
   const prefKey = 'sts2wc.size';
-  let pref = Number(readRun(prefKey)) || null;
+  const readPref = () => { const v = readRun(prefKey); return v === 'all' ? 'all' : Number(v) || null; };
 
   // 저장된 판: 모든 출전 항목이 지금 목록에 있고 대진이 맞아야 이어 한다
-  let run = readRun(storeKey);
-  let state = run && run.entrants?.every?.(id => byId.has(id)) ? bracket(run.entrants, run.picks) : null;
+  let run = upgradeRun(readRun(storeKey));
+  let state = run && run.entrants.every(id => byId.has(id)) ? bracket(run.entrants, run.sides) : null;
   if (!state || (run.finished && !(Date.now() - Number(run.at) < RESUME_FINISHED_MS))) {
-    if (run) writeRun(storeKey, null);
+    if (readRun(storeKey)) writeRun(storeKey, null);
     run = null;
     state = null;
   }
-  let chosen = defaultSize(items.length, run?.size ?? pref);
+  let chosen = defaultSize(items.length, run ? (run.size === items.length ? 'all' : run.size) : readPref());
   let last = null; // 방금 경기 { winner, loser }
   let abandonArmed = 0;
+  let byesOpen = false;
 
   const save = () => { run.at = Date.now(); writeRun(storeKey, run); };
 
   function start(size) {
-    // 고를 수 있었던 크기만 다음 기본값으로 기억한다 (캐릭터처럼 4강뿐인 곳이 기본값을 4로 바꾸지 않게)
-    if (sizes.length > 1) {
-      pref = size;
-      writeRun(prefKey, size);
-    }
-    run = { v: 1, size, entrants: drawEntrants(items.map(i => i.id), size), picks: [], finished: false, at: Date.now() };
-    state = bracket(run.entrants, run.picks);
+    // 고를 수 있었던 크기만 다음 기본값으로 기억한다 (캐릭터처럼 하나뿐인 곳이 기본값을 바꾸지 않게).
+    // 2의 거듭제곱이 아닌 '전체'는 'all' 로 기억해 다른 월드컵에서도 전체가 기본이 되게 한다.
+    if (options.length > 1) writeRun(prefKey, size === items.length && !isPow2(size) ? 'all' : size);
+    run = { v: 2, size, entrants: drawEntrants(items.map(i => i.id), size), sides: '', finished: false, at: Date.now() };
+    state = bracket(run.entrants, run.sides);
     last = null;
+    byesOpen = false;
     save();
     preload(run.entrants.slice(0, 4).map(id => byId.get(id)));
     draw(true);
@@ -184,26 +182,26 @@ export function mountWorldCup(opts) {
     if (!run || !state?.current) return;
     const m = state.current;
     const winner = byId.get(side ? m.b : m.a), loser = byId.get(side ? m.a : m.b);
-    run.picks.push(winner.id);
-    state = bracket(run.entrants, run.picks);
+    run.sides += side ? '1' : '0';
+    state = bracket(run.entrants, run.sides);
     last = { winner, loser };
     if (state.done) run.finished = true;
     save();
-    opts.onMatch?.({ winner, loser, size: m.size });
+    opts.onMatch?.({ winner, loser, size: run.size, round: m.round });
     if (state.done) {
       opts.onFinish?.({
         champion: byId.get(state.champion), runnerUp: byId.get(state.runnerUp),
         entrants: [...run.entrants], size: run.size,
-        matches: state.matches.map(x => [x.w, x.w === x.a ? x.b : x.a]),
+        matches: matchPairs(state),
       });
     }
     draw(state.done);
   }
 
   function undo() {
-    if (!run || !run.picks.length || run.finished) return;
-    run.picks.pop();
-    state = bracket(run.entrants, run.picks);
+    if (!run || !run.sides.length || run.finished) return;
+    run.sides = run.sides.slice(0, -1);
+    state = bracket(run.entrants, run.sides);
     last = null;
     save();
     draw();
@@ -219,34 +217,45 @@ export function mountWorldCup(opts) {
     return el;
   }
 
+  // 고른 크기의 설명: 무작위 추첨 / 전체(예선·부전승)
+  function sizeNote(n) {
+    if (n < items.length) return t('wc.drawNote', { total: items.length, n });
+    const p = plan(n);
+    if (!p.prelims) return t('wc.allNote', { n });
+    return t('wc.allByeNote', { n, k: p.prelims, b: p.byes, p: p.P });
+  }
+
   function drawPicker() {
-    if (!sizes.length) {
+    if (!options.length) {
       return h('section', { class: 'empty cup-empty' },
         h('h2', {}, t('wc.tooFew')),
-        h('p', {}, t('wc.tooFewBody', { n: SIZES[0], have: items.length })));
+        h('p', {}, t('wc.tooFewBody', { n: MIN_SIZE, have: items.length })));
     }
     const buttons = h('div', { class: 'cup-sizes', role: 'radiogroup', 'aria-label': t('wc.sizeAria') },
-      sizes.map(n => h('button', {
-        class: `cup-size${n === chosen ? ' on' : ''}`, role: 'radio', 'aria-checked': String(n === chosen),
-        onclick: () => { chosen = n; draw(); },
-        ondblclick: () => start(n),
+      options.map(o => h('button', {
+        type: 'button',
+        class: `cup-size${o.n === chosen ? ' on' : ''}${o.full ? ' is-full' : ''}`, role: 'radio', 'aria-checked': String(o.n === chosen),
+        onclick: () => { chosen = o.n; draw(); },
+        ondblclick: () => start(o.n),
       },
-        h('strong', {}, t('wc.size', { n })),
-        h('span', {}, t('wc.sizeMatches', { n: n - 1 })))));
+        h('strong', {}, o.full && !isPow2(o.n) ? t('wc.sizeAll', { n: o.n }) : t('wc.size', { n: o.n })),
+        h('span', {}, o.prelims ? t('wc.sizeMatchesPrelim', { n: o.matches, k: o.prelims }) : t('wc.sizeMatches', { n: o.matches })),
+        o.full && isPow2(o.n) && options.length > 1 ? h('em', {}, t('wc.allBadge')) : null)));
     return h('section', { class: 'cup-picker' },
       h('h2', { class: 'vs-question' }, opts.question),
       h('p', { class: 'cup-picker-lead' }, t('wc.pickSize')),
       buttons,
-      h('p', { class: 'help cup-picker-note' }, t('wc.drawNote', { total: items.length, n: chosen })),
+      h('p', { class: 'help cup-picker-note' }, sizeNote(chosen),
+        chosen - 1 >= 100 ? [' ', t('wc.longNote', { n: chosen - 1 })] : null),
       h('p', { class: 'cup-start-wrap' },
-        h('button', { class: 'btn primary cup-start', onclick: () => start(chosen) }, t('wc.start', { size: t('wc.size', { n: chosen }) }))),
+        h('button', { type: 'button', class: 'btn primary cup-start', onclick: () => start(chosen) }, t('wc.start', { size: sizeLabel(chosen) }))),
     );
   }
 
   function side(item, i) {
     return h('div', { class: `vs-side vs-${i ? 'right' : 'left'}` },
       h('button', {
-        class: 'vs-pick', 'aria-label': t('wc.pickAria', { name: item.name }),
+        type: 'button', class: 'vs-pick', 'aria-label': t('wc.pickAria', { name: item.name }),
         onclick: () => pick(i),
       },
         h('span', { class: `vs-media kind-${kind}` },
@@ -255,8 +264,21 @@ export function mountWorldCup(opts) {
         opts.extra?.(item) ?? null,
         h('span', { class: 'vs-key kbd-only', 'aria-hidden': 'true' }, i ? '→' : '←'),
       ),
-      opts.onDetail ? h('button', { class: 'btn ghost small vs-info', onclick: () => opts.onDetail(item) }, t('wc.detail')) : null,
+      opts.onDetail ? h('button', { type: 'button', class: 'btn ghost small vs-info', onclick: () => opts.onDetail(item) }, t('wc.detail')) : null,
     );
+  }
+
+  // 예선 동안: 부전승으로 바로 P강에 오른 항목들 (많으면 앞의 몇 개 + '모두 보기')
+  function drawByes() {
+    const byes = state.byes;
+    if (!byes.length || state.current?.round !== 'pre') return null;
+    const names = byes.map(id => byId.get(id)?.name ?? '?');
+    const shown = byesOpen ? names : names.slice(0, BYES_SHOWN);
+    const rest = names.length - shown.length;
+    return h('p', { class: 'cup-byes' },
+      h('span', { class: 'cup-byes-label' }, t('wc.byes', { n: byes.length, p: state.plan.P })), ' ',
+      h('span', { class: 'cup-byes-names' }, shown.join(', ')),
+      rest > 0 ? [' ', h('button', { type: 'button', class: 'linkish cup-byes-more', onclick: () => { byesOpen = true; draw(); } }, t('wc.byesMore', { n: rest }))] : null);
   }
 
   function drawMatch() {
@@ -266,6 +288,7 @@ export function mountWorldCup(opts) {
     const ahead = state.matches.filter(x => x.w === undefined && x !== m && x.a && x.b).slice(0, 2);
     preload(ahead.flatMap(x => [byId.get(x.a), byId.get(x.b)]));
     const abandonBtn = h('button', {
+      type: 'button',
       class: `btn ghost small cup-abandon${abandonArmed ? ' armed' : ''}`,
       onclick: () => {
         if (abandonArmed) { clearTimeout(abandonArmed); abandonArmed = 0; abandon(); return; }
@@ -278,16 +301,17 @@ export function mountWorldCup(opts) {
       h('div', { class: 'cup-bar' },
         h('div', { class: 'cup-status' },
           h('span', { class: 'cup-round', 'aria-live': 'polite' }, matchLabel(m)),
-          h('span', { class: 'cup-count' }, t('wc.progress', { n: state.played, total: state.total, size: t('wc.size', { n: run.size }) }))),
+          h('span', { class: 'cup-count' }, t('wc.progress', { n: state.played, total: state.total, size: sizeLabel(run.size) }))),
         h('div', {
           class: 'cup-progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(state.total),
           'aria-valuenow': String(state.played), 'aria-label': t('wc.progressAria'),
         }, h('span', { style: { width: `${pct}%` } })),
         h('div', { class: 'cup-tools' },
-          h('button', { class: 'btn ghost small cup-undo', disabled: run.picks.length ? null : true, onclick: undo },
+          h('button', { type: 'button', class: 'btn ghost small cup-undo', disabled: run.sides.length ? null : true, onclick: undo },
             h('span', { 'aria-hidden': 'true' }, '↶ '), t('wc.undo')),
           abandonBtn),
       ),
+      drawByes(),
       h('h2', { class: 'vs-question' }, opts.question),
       h('div', { class: `vs-pair kind-${kind}` },
         side(byId.get(m.a), 0),
@@ -308,22 +332,27 @@ export function mountWorldCup(opts) {
     const runner = byId.get(state.runnerUp);
     const road = roadOf(state, champ.id);
     return h('section', { class: 'cup-champ' },
-      h('p', { class: 'cup-champ-kicker' }, t('wc.champKicker', { size: t('wc.size', { n: run.size }) })),
+      h('p', { class: 'cup-champ-kicker' }, t('wc.champKicker', { size: sizeLabel(run.size) })),
       h('h2', { class: 'cup-champ-title' }, h('span', { 'aria-hidden': 'true' }, '🏆 '), t('wc.champion')),
       h('div', { class: `cup-champ-card kind-${kind}` },
         h('span', { class: `vs-media kind-${kind}` },
           champ.img ? pic(champ, { decoding: 'async' }) : h('span', { class: 'vs-noimg', 'aria-hidden': 'true' }, Array.from(champ.name || '?')[0])),
         h('span', { class: 'vs-name cup-champ-name' }, champ.name),
         opts.extra?.(champ) ?? null,
-        opts.onDetail ? h('button', { class: 'btn ghost small', onclick: () => opts.onDetail(champ) }, t('wc.detail')) : null,
+        opts.onDetail ? h('button', { type: 'button', class: 'btn ghost small', onclick: () => opts.onDetail(champ) }, t('wc.detail')) : null,
       ),
       h('div', { class: 'cup-after' },
         h('section', { class: 'cup-road' },
           h('h3', {}, t('wc.road')),
           h('ol', {}, road.map(r => {
+            if (r.bye) {
+              return h('li', { class: 'bye' },
+                h('span', { class: 'cup-road-round' }, roundName(r.round)),
+                h('span', { class: 'cup-road-name' }, t('wc.byeRoad')));
+            }
             const o = byId.get(r.opponent);
-            return h('li', { class: r.size === 2 ? 'final' : null },
-              h('span', { class: 'cup-road-round' }, roundName(r.size)),
+            return h('li', { class: r.round === 2 ? 'final' : null },
+              h('span', { class: 'cup-road-round' }, roundName(r.round)),
               mini(o),
               h('span', { class: 'cup-road-name' }, t('wc.beat', { name: o.name })),
             );
@@ -333,17 +362,17 @@ export function mountWorldCup(opts) {
           h('div', { class: 'cup-runner-row' }, mini(runner), h('span', { class: 'cup-road-name' }, runner.name))),
       ),
       h('p', { class: 'actions cup-actions' },
-        h('button', { class: 'btn primary', onclick: () => start(run.size) }, t('wc.again', { size: t('wc.size', { n: run.size }) })),
-        h('button', { class: 'btn', onclick: abandon }, t('wc.otherSize')),
-        opts.onRank ? h('button', { class: 'btn', onclick: () => opts.onRank() }, t('wc.toRank')) : null,
-        h('button', { class: 'btn ghost', onclick: () => saveImage(champ, runner) }, t('wc.saveImage')),
+        h('button', { type: 'button', class: 'btn primary', onclick: () => start(run.size) }, t('wc.again', { size: sizeLabel(run.size) })),
+        h('button', { type: 'button', class: 'btn', onclick: abandon }, t('wc.otherSize')),
+        opts.onRank ? h('button', { type: 'button', class: 'btn', onclick: () => opts.onRank() }, t('wc.toRank')) : null,
+        h('button', { type: 'button', class: 'btn ghost', onclick: () => saveImage(champ, runner) }, t('wc.saveImage')),
       ),
     );
   }
 
   async function saveImage(champ, runner) {
     try {
-      const blob = await championImage({ title: opts.title, size: run.size, champ, runner, fallback: opts.imgFallback?.(champ) });
+      const blob = await championImage({ title: opts.title, size: sizeLabel(run.size), champ, runner, fallback: opts.imgFallback?.(champ) });
       const url = URL.createObjectURL(blob);
       const name = `${opts.title || 'worldcup'} - ${champ.name}`.replace(/[\\/:*?"<>|]/g, '_');
       const a = h('a', { href: url, download: `${name}.png` });
@@ -377,7 +406,7 @@ export function mountWorldCup(opts) {
       if (e.key === 'ArrowLeft') { e.preventDefault(); pick(0); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); pick(1); }
       else if (e.key === 'Backspace' || e.key === 'z' || e.key === 'Z') { e.preventDefault(); undo(); }
-    } else if (!run && sizes.length && e.key === 'Enter' && tg === document.body) {
+    } else if (!run && options.length && e.key === 'Enter' && tg === document.body) {
       e.preventDefault();
       start(chosen);
     }
@@ -431,7 +460,7 @@ async function championImage({ title, size, champ, runner, fallback }) {
   g.fillText(`🏆 ${t('wc.champion')}`, W / 2, 140, W - 80);
   g.fillStyle = '#a99a7c';
   g.font = `500 22px ${font}`;
-  g.fillText(t('wc.champKicker', { size: t('wc.size', { n: size }) }), W / 2, 178, W - 80);
+  g.fillText(t('wc.champKicker', { size }), W / 2, 178, W - 80);
 
   const img = (await loadImage(champ.img)) || (fallback ? await loadImage(fallback) : null);
   const box = { x: 90, y: 210, w: W - 180, h: 500 };
