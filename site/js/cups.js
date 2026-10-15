@@ -14,10 +14,12 @@ import {
   mountWorldCup, sizesFor, sizeLabel, upToLabel, cupMetrics, runStats, RANK_FEW, fmtIndex, fmtProgress, enoughCupData, rankOrder,
 } from './worldcup.js';
 import { icon, avatar, timeEl, commentsSection, reportDialog } from './community.js';
+import { checkImageSafe, preloadImageCheck } from './nsfw.js';
 
 const enc = encodeURIComponent;
 // bytes: 서버 한도, target: 저장 공간(D1)을 아끼려고 되도록 맞추는 크기
-const LIMITS = { titleMin: 2, title: 60, desc: 300, name: 80, itemsMin: 4, items: 64, bytes: 300 * 1024, target: 100 * 1024, px: 512 };
+// minPx: 서버가 받는 가장 짧은 변 (API.md 이미지 검열: 16–1024px)
+const LIMITS = { titleMin: 2, title: 60, desc: 300, name: 80, itemsMin: 4, items: 64, bytes: 300 * 1024, target: 100 * 1024, px: 512, minPx: 16 };
 const strLen = s => [...String(s ?? '')].length;
 const short = (s, n = 24) => { const a = [...String(s || '')]; return a.length > n ? `${a.slice(0, n - 1).join('')}…` : a.join(''); };
 const num = v => Math.max(0, Number(v) || 0);
@@ -320,6 +322,8 @@ async function shrinkImage(file) {
   const W = src.width || src.naturalWidth, H = src.height || src.naturalHeight;
   if (!W || !H) throw Object.assign(new Error('decode'), { code: 'img_decode' });
   let scale = Math.min(1, LIMITS.px / Math.max(W, H));
+  // 너무 작거나 길쭉해서 짧은 변이 16px 아래가 되는 그림은 서버가 받지 않는다
+  if (Math.min(W, H) * scale < LIMITS.minPx) { src.close?.(); throw Object.assign(new Error('dimensions'), { code: 'img_dimensions' }); }
   let best = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const w = Math.max(1, Math.round(W * scale)), hh = Math.max(1, Math.round(H * scale));
@@ -371,14 +375,20 @@ function uploadBlob(blob, onProgress) {
   });
 }
 
+// 줄이기 → 브라우저 검사(nsfw.js, 야한 그림이면 올리지 않음) → 올리기. 서버도 다시 검사한다.
 async function uploadFile(file, onProgress) {
   const blob = await shrinkImage(file);
+  const safe = await checkImageSafe(blob);
+  if (!safe.ok) throw Object.assign(new Error('nsfw'), { code: 'img_nsfw' });
   onProgress?.(0.02);
   return uploadBlob(blob, onProgress);
 }
 
 function uploadErrorText(err) {
   if (err?.code === 'img_type' || err?.code === 'img_decode') return t('cups.img.unreadable');
+  if (err?.code === 'img_nsfw') return t('cups.img.nsfw');
+  if (err?.code === 'img_dimensions' || (err?.status === 400 && err.reason === 'dimensions')) return t('cups.img.dimensions');
+  if (err?.status === 400 && err.reason === 'animated') return t('cups.img.animated');
   if (err?.status === 413 || err?.code === 'too_big') return t('cups.img.tooBig');
   if (err?.status === 415 || (err?.status === 400 && (err.reason === 'type' || err.reason === 'image'))) return t('cups.img.unreadable');
   if (err?.status === 429 && err.reason === 'daily') return t('cups.img.daily');
@@ -395,6 +405,7 @@ function filePicker() {
   return {
     input,
     pick({ multiple = false } = {}) {
+      preloadImageCheck(); // 파일을 고르는 동안 검사 모델을 받아 둔다
       return new Promise(resolve => {
         done = resolve;
         input.multiple = multiple;
@@ -1454,7 +1465,8 @@ async function viewCup(id, ctx) {
                 h('span', { class: `vs-rank-cup${r.i.champ ? ' has' : ''}` }, r.i.champ ? '🏆 ' : null, t('cups.rank.cup', { c: r.i.champ, e: r.i.entries, p: pc })),
                 h('br'),
                 n ? t('cups.rank.win', { w: r.i.wins, l: r.i.losses, p: pw }) : t('vs.rank.noGames'),
-                stats ? [h('br'), stats] : null)),
+                stats ? [h('br'), stats] : null),
+              imageReportButton(r.i)),
             h('span', { class: `vs-rank-rating${shown === '—' ? ' is-none' : ''}`, title: label(sort) }, shown),
           ),
         ];
@@ -1464,6 +1476,15 @@ async function viewCup(id, ctx) {
         cupSort ? ` ${t('wc.rank.few', { n: RANK_FEW })} ${t('wc.rank.since')}` : '',
         unplayed > 0 ? ` ${t('cups.rank.unplayed', { n: unplayed })}` : ''),
     );
+  }
+
+  // 올린 이미지 신고 (남의 월드컵에서만). 3명이 신고하면 그 이미지는 숨겨지고 기본 이미지로 보인다.
+  function imageReportButton(it) {
+    if (!it.upload || isMine(cup)) return null;
+    return h('button', {
+      class: 'cups-img-report', type: 'button',
+      onclick: () => reportDialog('image', it.ref.slice(4), 'image', t('cups.reportImageLead', { name: short(it.name, 30) })),
+    }, icon('flag'), t('cups.reportImage'));
   }
 
   function drawBody() {

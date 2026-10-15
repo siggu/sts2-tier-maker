@@ -14,6 +14,7 @@ import * as community from './community.js';
 import { currentUser } from './auth.js';
 import * as play from './play.js';
 import * as cups from './cups.js';
+import * as admin from './admin.js';
 
 const app = document.getElementById('app');
 let db = null;
@@ -45,7 +46,7 @@ function route() {
   setNav(parts[0] === 'balance' ? 'balance' : 'tier', parts);
 
   // 기능 모듈이 먼저 자기 주소(#/gallery, #/versus 등)를 처리한다.
-  if (community.route(parts, params, ctx) || play.route(parts, params, ctx) || cups.route(parts, params, ctx)) return;
+  if (community.route(parts, params, ctx) || play.route(parts, params, ctx) || cups.route(parts, params, ctx) || admin.route(parts, params, ctx)) return;
 
   if (parts[0] === 'tier' && parts[1]) return viewTier(parts[1], params.get('s'));
   if (parts[0] === 'c' && parts[1]) return viewCategory('tier', parts[1]);
