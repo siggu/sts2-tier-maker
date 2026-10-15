@@ -20,10 +20,12 @@
 | `src/account.js` | `/auth/*`, `/me*`, `/gallery*`, `/comments*`, `/items/*/comments`, `/report` |
 | `src/play.js` | `/tiers/aggregate`, `/versus*` (월드컵) |
 | `src/cups.js` | `/images`, `/img/:id`, `/cups*` (사용자 월드컵) |
+| `src/bracket.js` | 월드컵 한 판의 대진 검사(`checkBracket`)와 대진 크기를 반영한 수치(`bracketStats`) — play.js·cups.js 공용 |
 | `migrations/0002_accounts.sql` | users, sessions, user_tiers, posts, reactions, comments, comment_likes, reports |
 | `migrations/0003_play.sql` | versus_votes, versus_ratings |
 | `migrations/0004_gallery_kind_worldcup.sql` | worldcup_stats (월드컵 부분) |
 | `migrations/0005_cups.sql` | cups, cup_items, cup_likes, images (사용자 월드컵) |
+| `migrations/0006_bracket_stats.sql` | worldcup_stats·cup_items 에 expected, progress, tracked, tracked_champ |
 
 `handleAccount` / `handlePlay` / `handleCups` 는 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
 
@@ -125,26 +127,42 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 
 ## 월드컵 (play.js)
 
-사이트 `#/versus` 는 이상형 월드컵식 토너먼트다 (4·8·16·32·64강, 무작위 추첨). 경기 하나마다 `POST /versus` 로 Elo 를,
-한 판이 끝나면 `POST /versus/tournament` 로 우승·출전 횟수를 보낸다.
+사이트 `#/versus` 는 이상형 월드컵식 토너먼트다. 경기 하나마다 `POST /versus` 로 Elo 를,
+한 판이 끝나면 `POST /versus/tournament` 로 한 판의 결과(출전·경기·우승)를 보낸다.
 
 | 요청 | 설명 |
 |---|---|
 | `POST /versus` `{ category, winner, loser, voter? }` | 한 경기. 같은 카테고리의 두 아이템 id. 로그인 상태면 계정, 아니면 익명 voter(형식은 `/balance` 와 같음). IP 당 1분 60회. 같은 사람이 같은 쌍에 다시 내면 마지막 선택만 반영(되돌리기 후 다르게 고른 경우 포함). `{ ok, ratings: { [winner]: r, [loser]: r } }` |
-| `POST /versus/tournament` `{ category, champion, entrants: [아이템id...], voter? }` | 한 판의 결과. `entrants` 는 4·8·16·32·64개, 서로 다르고 모두 그 카테고리의 아이템, `champion` 은 그중 하나. 출전 항목마다 `entries + 1`, 우승 항목은 `champ + 1`. 로그인·voter 규칙은 `/versus` 와 같다(저장하지는 않음). IP 당 1분 6회(`cup` 버킷). `{ ok: true }`. 400 `reason`: `json`·`body`·`category`·`entrants`·`item`·`duplicate`·`champion`·`voter` |
-| `GET /versus/ranking?category=` | `{ category, items: { 아이템id: { rating, wins, losses, champ, entries } } }` (30초 캐시). 경기나 월드컵 기록이 하나라도 있는 항목만. 월드컵에만 나온 항목은 `rating: 1500, wins: 0, losses: 0`. 우승률 = `champ / entries` (화면에서 계산) |
+| `POST /versus/tournament` `{ category, champion, entrants: [아이템id...], matches: [[이긴 id, 진 id]...], voter? }` | 한 판의 결과. 아래 **대진 규칙**. `entrants` 는 그 카테고리의 아이템 2개 이상, 그 카테고리의 항목 수·512 이하. 출전 항목마다 `entries + 1`, 우승 항목은 `champ + 1`, 그리고 **대진 크기 수치**(서버가 계산). 로그인·voter 규칙은 `/versus` 와 같다(저장하지는 않음). IP 당 1분 6회(`cup` 버킷). `{ ok: true }`. 400 `reason`: `json`·`body`·`category`·`entrants`·`item`·`duplicate`·`matches`·`match`·`prelim`·`round`·`champion`·`voter` (경기 오류면 `index` = 문제 경기 위치, 0부터). `matches` 가 없는 예전 화면의 결과는 400 `matches`. |
+| `GET /versus/ranking?category=` | `{ category, items: { 아이템id: { rating, wins, losses, champ, entries, expected, progress, tracked, trackedChamp } } }` (30초 캐시). 경기나 월드컵 기록이 하나라도 있는 항목만. 월드컵에만 나온 항목은 `rating: 1500, wins: 0, losses: 0`. 화면 계산: 우승률 = `champ / entries`, 우승 지수 = `trackedChamp / expected`, 평균 진출도 = `progress / tracked` (분모가 0 이면 표시하지 않음 —). |
 
 Elo: 시작 1500, K = 24. 같은 쌍 재투표로 결과가 바뀌면 앞선 결과를 되돌리지 않고 새 결과만 반영해도 된다(단순화) — 대신 wins/losses 는 versus_votes 에서 다시 센다.
+
+**대진 규칙** (`/versus/tournament`, `/cups/:id/play` 공통, `src/bracket.js`): 출전 n개, P = n 이하의 가장 큰 2의 거듭제곱, k = n − P.
+- n 이 2의 거듭제곱이면 보통의 n강. 아니면 먼저 **예선** k경기(서로 다른 2k개 항목)를 치르고, 나머지 P − k 개는 **부전승**으로 P강에 오른 뒤 P강 … 결승.
+- `matches` 는 치른 순서대로 정확히 n − 1 개: 앞의 k개가 예선(같은 항목이 두 번 나오면 `prelim`), 그 뒤 P/2, P/4, …, 1 경기씩 라운드
+  (한 라운드에 같은 항목이 두 번 나오면 `round` — 그 라운드에 남은 항목은 모두 한 번씩 치른다).
+- 두 id 는 출전 항목이고 서로 다르며, 한 번 진 항목은 그 뒤 경기에 나오지 않는다 (`match`). `champion` = 마지막 경기의 승자 (`champion`).
+- 예선에 나오지 않은 항목이 부전승이다 (본선 짝은 서버가 따지지 않는다. 사이트는 '예선 승자 vs 부전승' 짝을 먼저 만든다).
+
+**대진 크기 수치** (서버가 `entrants`·`matches` 로 직접 계산한다 — 화면이 보낸 수는 쓰지 않는다). 한 판(라운드 R = log2(P) + (k > 0 ? 1 : 0))마다 출전 항목에:
+- `expected += 1/n` — 운으로 기대되는 우승 횟수. **우승 지수** = `tracked_champ / expected` (1.0 = 보통, 2.0 = 운의 두 배). 4강 우승보다 64강 우승을 16배 크게 친다.
+- `progress += (이긴 경기 수 + 부전승이면 1) / R` — 우승 1, 첫 경기 탈락 0, 부전승 후 첫 경기 탈락 1/R. **평균 진출도** = `progress / tracked` (0–100%).
+  예) 5개 전체(R = 3): 예선 탈락 0, 예선 승 후 준결승 탈락 1/3, 부전승 후 준결승 탈락 1/3, 준우승 2/3, 우승 1.
+- `tracked += 1`, `tracked_champ += 우승이면 1` — 0006 이후의 판만 센 출전·우승 횟수. 그 전의 판에는 expected·progress 가 없으므로
+  지수·진출도는 전체 기간의 `champ`·`entries` 가 아니라 이것으로 나눈다 (같은 판들끼리만 비교).
 
 ```sql
 versus_votes(category, a, b, voter, winner, ts, PRIMARY KEY(category, a, b, voter))   -- a < b 로 정렬해 저장
 versus_ratings(category, item, rating REAL DEFAULT 1500, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, PRIMARY KEY(category, item))
-worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 0, PRIMARY KEY(category, item))   -- 0004
+worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 0,                                     -- 0004
+               expected REAL DEFAULT 0, progress REAL DEFAULT 0, tracked INTEGER DEFAULT 0, tracked_champ INTEGER DEFAULT 0,  -- 0006
+               PRIMARY KEY(category, item))
 ```
 
 ## 사용자 월드컵 (cups.js)
 
-로그인한 사람이 이상형 월드컵을 만든다: 제목, 설명, 표지, 항목 4–64개(이름 + 이미지). 누구나 할 수 있고(대진은 화면이 짠다)
+로그인한 사람이 이상형 월드컵을 만든다: 제목, 설명, 표지, 항목 4–64개(이름 + 이미지). 누구나 할 수 있고(대진은 화면이 짠다: 4강·8강…·전체)
 한 판이 끝나면 결과를 한 번 보낸다. 좋아요·댓글·신고·작성자 수정(제목·설명·표지만)·삭제.
 
 **이미지 참조** (표지 `cover`, 항목 `img`, 미리보기 `sample` 모두 같은 문자열):
@@ -158,10 +176,10 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 | `GET /img/:id` | 이미지 바이트. `Content-Type` 은 올릴 때 형식, `Cache-Control: public, max-age=31536000, immutable`, `Access-Control-Allow-Origin: *`(canvas 에 그릴 수 있게), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cross-Origin-Resource-Policy: cross-origin`. 없으면 404. |
 | `POST /cups` 🔒 `{ title, description?, cover?, items: [{ name, img? }] }` | 만들기 → `{ cup }`. 제목 2–60자(한 줄), 설명 0–300자(줄바꿈 가능), 항목 4–64개, 항목 이름 1–80자(한 줄). `cover`·`img` 는 빼면 `null`. 항목 id 는 서버가 순서대로 `'i1'…'iN'`. 사용자당 1분 3개, 하루 10개(`reason: 'daily'`). |
 | `GET /cups?sort=new|top&cursor=&author=` | `{ cups: [cup], next }` (20개씩). `sort` 기본 `new`. `top` = 좋아요 → 판 수 → 최신 순. `author` 는 users.id. 숨겨진 월드컵은 작성자·관리자에게만. |
-| `GET /cups/:id` | `{ cup, items: [{ id, name, img, champ, entries, wins, losses }] }` (항목 순서대로). 숨겨진 월드컵은 작성자·관리자 아니면 404. |
+| `GET /cups/:id` | `{ cup, items: [{ id, name, img, champ, entries, wins, losses, expected, progress, tracked, trackedChamp }] }` (항목 순서대로. 뒤의 넷은 위 **대진 크기 수치**). 숨겨진 월드컵은 작성자·관리자 아니면 404. |
 | `PATCH /cups/:id` 🔒 `{ title?, description?, cover? }` | 작성자나 관리자. 준 필드만 바꾼다(항목은 못 바꾼다). `{ cup }` |
 | `DELETE /cups/:id` 🔒 | 작성자나 관리자. 항목·좋아요·댓글(+댓글 좋아요·신고)·월드컵 신고를 같이 지운다. 올린 이미지는 남긴다. `{ ok: true }` |
-| `POST /cups/:id/play` `{ champion, entrants, matches, voter? }` | 한 판의 결과 → `{ ok: true }`. 아래 규칙. 로그인 상태면 계정, 아니면 익명 `voter`(형식은 `/balance` 와 같음, 저장하지는 않음). IP 당 1분 6판(`cupplay` 버킷). `plays + 1`, 출전 항목 `entries + 1`, 우승 항목 `champ + 1`, 경기마다 이긴 쪽 `wins + 1`·진 쪽 `losses + 1`. |
+| `POST /cups/:id/play` `{ champion, entrants, matches, voter? }` | 한 판의 결과 → `{ ok: true }`. 아래 규칙. 로그인 상태면 계정, 아니면 익명 `voter`(형식은 `/balance` 와 같음, 저장하지는 않음). IP 당 1분 6판(`cupplay` 버킷). `plays + 1`, 출전 항목 `entries + 1`, 우승 항목 `champ + 1`, 경기마다 이긴 쪽 `wins + 1`·진 쪽 `losses + 1`, 그리고 **대진 크기 수치**(expected·progress·tracked·tracked_champ, 서버가 계산). |
 | `POST /cups/:id/like` 🔒 `{ on: bool }` | `{ likes, myLike }`. 사용자당 1분 60번. |
 | `GET /cups/:id/comments` | `{ comments: [comment] }` (오래된 순, 최대 200) — 갤러리 글 댓글과 같은 모양 |
 | `POST /cups/:id/comments` 🔒 `{ body }` | `{ comment }`. 본문 1–500자, 1분에 5개(모든 댓글 합산). 댓글 좋아요·삭제·신고는 기존 `/comments/:id/like`, `DELETE /comments/:id`, `POST /report { kind: 'comment' }`. |
@@ -172,9 +190,8 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 - `next` 는 다음 쪽 `cursor` 로 그대로 넘기는 문자열, 끝이면 `null`.
 
 `play` 규칙 (틀리면 400 `reason`):
-- `entrants`: 서로 다른 이 월드컵의 항목 id, 개수 4·8·16·32·64 이고 항목 수 이하 (`entrants` / 없는 id `item` / 겹침 `duplicate`).
-- `matches`: `[이긴 id, 진 id]` 를 치른 순서대로, 정확히 `entrants.length − 1` 개 (`matches`). 두 id 는 출전 항목이고 서로 다르며,
-  한 번 진 항목은 그 뒤 경기에 나오지 않는다 (`match`).
+- `entrants`: 서로 다른 이 월드컵의 항목 id, 2개 이상 항목 수 이하 (`entrants` / 없는 id `item` / 겹침 `duplicate`). 2의 거듭제곱이 아니면 예선·부전승.
+- `matches`: `[이긴 id, 진 id]` 를 치른 순서대로, 정확히 `entrants.length − 1` 개 (`matches`), 위 **대진 규칙** (`match`·`prelim`·`round`, 이때 `index`).
 - `champion` = 마지막 경기의 승자 (`champion`). 로그인하지 않았고 `voter` 가 틀리면 `voter`
   (`Authorization` 을 보냈는데 세션이 틀리면 401 `auth`). 본문이 JSON 이 아니면 `json`.
 
@@ -187,7 +204,9 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 
 ```sql
 cups(id TEXT PK, user_id, title, description, cover, item_count, sample TEXT(JSON), plays, likes, comments, hidden, created)
-cup_items(cup_id, id, pos, name, img, champ, entries, wins, losses, PRIMARY KEY(cup_id, id))   -- id = 'i' || pos
+cup_items(cup_id, id, pos, name, img, champ, entries, wins, losses,
+          expected, progress, tracked, tracked_champ,                     -- 0006, 대진 크기 수치
+          PRIMARY KEY(cup_id, id))                                         -- id = 'i' || pos
 cup_likes(cup_id, user_id, PRIMARY KEY(cup_id, user_id))
 images(id TEXT PK, user_id, type, bytes BLOB, size, created)                                   -- id = sha256 앞 32 hex
 ```

@@ -10,7 +10,9 @@ import { h, toast, hideTip } from './ui.js';
 import { t } from './i18n.js';
 import { API_BASE, voterId } from './balance.js';
 import { currentUser, authHeaders, requireLogin, api, errorText, openModal, dropSession } from './auth.js';
-import { mountWorldCup, sizesFor } from './worldcup.js';
+import {
+  mountWorldCup, sizesFor, sizeLabel, upToLabel, cupMetrics, runStats, RANK_FEW, fmtIndex, fmtProgress, enoughCupData, rankOrder,
+} from './worldcup.js';
 import { icon, avatar, timeEl, commentsSection, reportDialog } from './community.js';
 
 const enc = encodeURIComponent;
@@ -577,7 +579,7 @@ function stat(name, n, label, cls = '') {
 }
 
 function cupCard(cup, db) {
-  const top = sizesFor(num(cup.itemCount)).pop();
+  const upTo = upToLabel(num(cup.itemCount));
   return h('a', { class: `cupc${cup.hidden ? ' is-hidden' : ''}`, href: `#/cup/${enc(cup.id)}` },
     coverVisual({ cover: cup.cover, sample: cup.sample, title: cup.title, itemCount: num(cup.itemCount) }, db, 'cupc-cover'),
     h('div', { class: 'cupc-body' },
@@ -592,7 +594,7 @@ function cupCard(cup, db) {
         stat('play', cup.plays, t('cups.stat.plays')),
         stat('heart', cup.likes, t('cups.stat.likes'), cup.myLike ? 'on' : ''),
         stat('chat', cup.comments, t('comments.title')),
-        top ? h('span', { class: 'cupc-size' }, t('cups.card.upTo', { size: t('wc.size', { n: top }) })) : null,
+        upTo ? h('span', { class: 'cupc-size' }, upTo) : null,
         cup.hidden ? h('span', { class: 'gal-hidden-badge' }, t('gallery.hiddenBadge')) : null,
         isMine(cup) ? h('span', { class: 'cupc-mine' }, t('cups.card.mine')) : null),
     ),
@@ -922,7 +924,7 @@ function viewNew(ctx) {
     itemCount.className = `cups-items-count ${n < LIMITS.itemsMin ? 'low' : n > LIMITS.items ? 'over' : 'ok'}`;
     const sizes = sizesFor(st.items.filter(r => r.name.trim()).length);
     sizeNote.textContent = sizes.length
-      ? t('cups.items.sizes', { sizes: sizes.map(s => t('wc.size', { n: s })).join(' · ') })
+      ? t('cups.items.sizes', { sizes: sizes.map(sizeLabel).join(' · ') })
       : t('cups.items.needMore', { n: Math.max(0, LIMITS.itemsMin - st.items.filter(r => r.name.trim()).length) });
   }
   const sizeNote = h('span', { class: 'cups-size-note' });
@@ -1216,7 +1218,10 @@ const fileLabel = f => String(f?.name || '').replace(/\.[a-z0-9]{2,5}$/i, '').re
 
 // ================================================================ 월드컵 하나 (#/cup/<id>)
 
-const RANK_SORT_KEY = 'sts2cup.rankSort';
+// 순위 정렬: 'index'(우승 지수) | 'progress'(평균 진출도) | 'win'(승률) | 'titles'(우승 횟수).
+// 고른 적이 없으면 대진 크기를 반영한 판이 충분할 때 우승 지수, 아니면 승률. (예전 열쇠의 'cup' 은 없어진 정렬이라 새 열쇠)
+const RANK_SORT_KEY = 'sts2cup.rankSort2';
+const RANK_SORTS = ['index', 'progress', 'win', 'titles'];
 let lastCupTab = { id: null, tab: 'play' };
 
 async function viewCup(id, ctx) {
@@ -1243,10 +1248,12 @@ async function viewCup(id, ctx) {
       img: refUrl(it.img, db) || fallback,
       upload: refKind(it.img) === 'upload',
       champ: num(it.champ), entries: num(it.entries), wins: num(it.wins), losses: num(it.losses),
+      expected: num(it.expected), progress: num(it.progress), tracked: num(it.tracked), trackedChamp: num(it.trackedChamp),
     };
   });
   let tab = lastCupTab.id === cup.id ? lastCupTab.tab : 'play';
-  let rankSort = readJson(RANK_SORT_KEY, 'cup') === 'win' ? 'win' : 'cup';
+  const savedSort = readJson(RANK_SORT_KEY, null);
+  let rankSort = RANK_SORTS.includes(savedSort) ? savedSort : null; // null = 데이터를 보고 정한다
   let engine = null;
   ctx.addCleanup(() => engine?.destroy());
   let likeBusy = false;
@@ -1358,9 +1365,16 @@ async function viewCup(id, ctx) {
   function onFinish({ champion, entrants, matches }) {
     queuePlay(cup.id, { champion: champion.id, entrants, matches });
     const byId = new Map(items.map(i => [i.id, i]));
-    for (const eid of entrants) { const it = byId.get(eid); if (it) it.entries++; }
-    byId.get(champion.id) && byId.get(champion.id).champ++;
-    for (const [w, l] of matches) { byId.get(w) && byId.get(w).wins++; byId.get(l) && byId.get(l).losses++; }
+    // 서버와 같은 계산 (bracket.js 의 runStats): 승패, 출전, 우승, 기대 우승 1/n, 진출도
+    const { expected, items: stats } = runStats(entrants, matches);
+    for (const eid of entrants) {
+      const it = byId.get(eid);
+      if (!it) continue;
+      const won = eid === champion.id ? 1 : 0;
+      it.entries++; it.champ += won; it.tracked++; it.trackedChamp += won;
+      it.wins += stats[eid].w; it.losses += stats[eid].l;
+      it.expected += expected; it.progress += stats[eid].p;
+    }
     cup.plays = num(cup.plays) + 1;
     drawStats();
   }
@@ -1381,45 +1395,74 @@ async function viewCup(id, ctx) {
   }
 
   function drawRank() {
-    const rows = items.filter(i => i.entries > 0 || i.wins + i.losses > 0).map(i => ({
-      i, cupRate: i.entries ? i.champ / i.entries : 0, winRate: i.wins + i.losses ? i.wins / (i.wins + i.losses) : 0,
+    const all = items.filter(i => i.entries > 0 || i.wins + i.losses > 0).map(i => ({
+      i, m: cupMetrics(i), winRate: i.wins + i.losses ? i.wins / (i.wins + i.losses) : null,
     }));
-    if (rankSort === 'win') rows.sort((a, b) => b.winRate - a.winRate || b.i.wins - a.i.wins || b.cupRate - a.cupRate);
-    else rows.sort((a, b) => b.cupRate - a.cupRate || b.i.champ - a.i.champ || b.winRate - a.winRate || b.i.entries - a.i.entries);
-    const sortSeg = h('div', { class: 'seg vs-rank-sort', role: 'group', 'aria-label': t('vs.rank.sort') },
-      [['cup', t('cups.rank.byCup')], ['win', t('cups.rank.byWin')]].map(([k, label]) => h('button', {
-        type: 'button', class: rankSort === k ? 'on' : null, 'aria-pressed': String(rankSort === k),
-        onclick: () => { if (rankSort !== k) { rankSort = k; writeJson(RANK_SORT_KEY, k); drawBody(); } },
-      }, label)));
-    if (!rows.length) {
+    if (!all.length) {
       return h('div', { class: 'empty cups-rank-empty' },
         h('p', {}, t('cups.rank.empty')),
         h('p', {}, h('button', { class: 'btn primary', type: 'button', onclick: () => setTab('play') }, t('vs.tab.play'))));
     }
-    const unplayed = items.length - rows.length;
+    // 고른 정렬이 없거나, 지수·진출도인데 그런 판이 하나도 없으면 데이터를 보고 정한다
+    let sort = rankSort;
+    if (!sort || ((sort === 'index' || sort === 'progress') && !all.some(r => r.m.tracked > 0))) {
+      sort = enoughCupData(all.map(r => r.i)) ? 'index' : 'win';
+    }
+    const cupSort = sort === 'index' || sort === 'progress';
+    for (const r of all) {
+      const n = r.i.wins + r.i.losses;
+      r.few = cupSort ? r.m.tracked < RANK_FEW : sort === 'win' ? n < RANK_FEW : r.i.entries < RANK_FEW;
+    }
+    const value = { index: r => r.m.index, progress: r => r.m.progress, win: r => r.winRate, titles: r => r.i.champ }[sort];
+    const tie = (a, b) => b.i.champ - a.i.champ || (b.winRate ?? 0) - (a.winRate ?? 0) || b.i.wins - a.i.wins || b.i.entries - a.i.entries;
+    const { top, few } = rankOrder(all, value, tie, cupSort);
+    const rows = [...top, ...few];
+    const maxIndex = Math.max(1, ...top.map(r => r.m.index ?? 0));
+    const maxChamp = Math.max(1, ...rows.map(r => r.i.champ));
+    const label = k => (k === 'win' ? t('cups.rank.byWin') : t(`wc.rank.${k}`));
+    const sortSeg = h('div', { class: 'seg vs-rank-sort', role: 'group', 'aria-label': t('vs.rank.sort') },
+      RANK_SORTS.map(k => h('button', {
+        type: 'button', class: sort === k ? 'on' : null, 'aria-pressed': String(sort === k),
+        onclick: () => { if (sort !== k) { rankSort = k; writeJson(RANK_SORT_KEY, k); drawBody(); } },
+      }, label(k))));
+    const unplayed = items.length - all.length;
+    const help = sort === 'win' ? t('cups.rank.help') : t(`wc.rank.help.${sort}`);
     return h('section', { class: 'cups-rank-wrap' },
       h('div', { class: 'vs-rank-head' },
-        h('p', { class: 'vs-rank-status' }, t('cups.rank.summary', { plays: num(cup.plays), n: rows.length })),
+        h('p', { class: 'vs-rank-status' }, t('cups.rank.summary', { plays: num(cup.plays), n: all.length })),
         sortSeg),
       h('ol', { class: 'vs-rank cups-rank' }, rows.map((r, idx) => {
         const n = r.i.wins + r.i.losses;
         const pc = pct(r.i.champ, r.i.entries);
         const pw = pct(r.i.wins, n);
-        const main = rankSort === 'win' ? pw : pc;
-        return h('li', { class: `vs-rank-row cups-rank-row${r.i.entries < 3 && n < 3 ? ' few' : ''}` },
-          h('span', { class: `vs-rank-no${idx < 3 ? ` top top${idx + 1}` : ''}` }, String(idx + 1)),
-          h('span', { class: 'cups-rank-img' }, pic(r.i.img, r.i.fallback, { class: r.i.upload ? 'fit-cover' : 'fit-contain', loading: 'lazy' })),
-          h('span', { class: 'vs-rank-main' },
-            h('span', { class: 'vs-rank-name' }, r.i.name),
-            h('span', { class: `vs-rank-bar${rankSort === 'cup' ? ' is-cup' : ''}`, 'aria-hidden': 'true' }, h('span', { style: { width: `${main}%` } })),
-            h('span', { class: 'vs-rank-sub' },
-              h('span', { class: `vs-rank-cup${r.i.champ ? ' has' : ''}` }, r.i.champ ? '🏆 ' : null, t('cups.rank.cup', { c: r.i.champ, e: r.i.entries, p: pc })),
-              h('br'),
-              n ? t('cups.rank.win', { w: r.i.wins, l: r.i.losses, p: pw }) : t('vs.rank.noGames'))),
-          h('span', { class: 'vs-rank-rating', title: rankSort === 'win' ? t('cups.rank.byWin') : t('cups.rank.byCup') }, `${main}%`),
-        );
+        const bar = sort === 'index' ? (r.m.index ?? 0) / maxIndex * 100
+          : sort === 'progress' ? (r.m.progress ?? 0) * 100
+            : sort === 'titles' ? r.i.champ / maxChamp * 100 : pw;
+        const shown = sort === 'index' ? fmtIndex(r.m.index) : sort === 'progress' ? fmtProgress(r.m.progress)
+          : sort === 'titles' ? String(r.i.champ) : (n ? `${pw}%` : '—');
+        const stats = r.m.tracked > 0 ? t('wc.rank.stats', { i: fmtIndex(r.m.index), p: fmtProgress(r.m.progress) }) : null;
+        return [
+          cupSort && few.length && r === few[0] ? h('li', { class: 'vs-rank-few-sep', 'aria-hidden': 'true' }, t('wc.rank.fewSep', { n: RANK_FEW })) : null,
+          h('li', { class: `vs-rank-row cups-rank-row${r.few ? ' few' : ''}` },
+            h('span', { class: `vs-rank-no${idx < 3 && !r.few ? ` top top${idx + 1}` : ''}` }, String(idx + 1)),
+            h('span', { class: 'cups-rank-img' }, pic(r.i.img, r.i.fallback, { class: r.i.upload ? 'fit-cover' : 'fit-contain', loading: 'lazy' })),
+            h('span', { class: 'vs-rank-main' },
+              h('span', { class: 'vs-rank-name' }, r.i.name),
+              h('span', { class: `vs-rank-bar${sort !== 'win' ? ' is-cup' : ''}`, 'aria-hidden': 'true' },
+                h('span', { style: { width: `${Math.max(0, Math.min(100, Math.round(bar)))}%` } })),
+              h('span', { class: 'vs-rank-sub' },
+                h('span', { class: `vs-rank-cup${r.i.champ ? ' has' : ''}` }, r.i.champ ? '🏆 ' : null, t('cups.rank.cup', { c: r.i.champ, e: r.i.entries, p: pc })),
+                h('br'),
+                n ? t('cups.rank.win', { w: r.i.wins, l: r.i.losses, p: pw }) : t('vs.rank.noGames'),
+                stats ? [h('br'), stats] : null)),
+            h('span', { class: `vs-rank-rating${shown === '—' ? ' is-none' : ''}`, title: label(sort) }, shown),
+          ),
+        ];
       })),
-      h('p', { class: 'help vs-rank-help' }, t('cups.rank.help'), unplayed > 0 ? ` ${t('cups.rank.unplayed', { n: unplayed })}` : ''),
+      h('p', { class: 'help vs-rank-help' },
+        help,
+        cupSort ? ` ${t('wc.rank.few', { n: RANK_FEW })} ${t('wc.rank.since')}` : '',
+        unplayed > 0 ? ` ${t('cups.rank.unplayed', { n: unplayed })}` : ''),
     );
   }
 

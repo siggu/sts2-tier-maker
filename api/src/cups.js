@@ -3,7 +3,7 @@
 import { json, ipHashOf, rateLimited, readJson } from './http.js';
 import { getUser, randomHex } from './auth.js';
 import { isAnonVoter } from './votes.js';
-import { BRACKET_SIZES } from './play.js';
+import { checkBracket, bracketStats } from './bracket.js';
 import { UNSAFE_CHARS, listComments, addComment } from './account.js';
 
 const PAGE_SIZE = 20;
@@ -33,6 +33,7 @@ const IMAGE_HEADERS = {
 };
 
 const len = s => [...s].length;
+const round4 = r => Math.round(r * 10000) / 10000;
 
 const ROUTES = [
   ['POST', /^\/images$/, auth(uploadImage)],
@@ -178,34 +179,24 @@ export function cupSample(items) {
   return [...refs.filter(r => r !== null), ...refs.filter(r => r === null)].slice(0, SAMPLE_SIZE);
 }
 
-// POST /cups/:id/play 본문 검사. itemIds = 그 월드컵의 항목 id 들. 틀리면 이유, 맞으면 null.
-// entrants: 서로 다른 항목 4·8·16·32·64개(항목 수 이하). matches: [이긴 id, 진 id] 를 치른 순서대로 entrants − 1 개.
-// 한 번 진 항목은 다시 나오지 않고(모두 한 번씩 져서 하나만 남는다), champion 은 마지막 경기의 승자.
-export function validatePlay(body, itemIds, loggedIn = false) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'body';
-  const { champion, entrants, matches, voter } = body;
-  if (!Array.isArray(entrants) || !BRACKET_SIZES.includes(entrants.length) || entrants.length > itemIds.size) return 'entrants';
-  if (!entrants.every(id => typeof id === 'string' && itemIds.has(id))) return 'item';
-  const entered = new Set(entrants);
-  if (entered.size !== entrants.length) return 'duplicate';
-  if (!Array.isArray(matches) || matches.length !== entrants.length - 1) return 'matches';
-  const out = new Set();
-  for (const m of matches) {
-    if (!Array.isArray(m) || m.length !== 2) return 'match';
-    const [w, l] = m;
-    if (!entered.has(w) || !entered.has(l) || w === l || out.has(w) || out.has(l)) return 'match';
-    out.add(l);
-  }
-  if (typeof champion !== 'string' || champion !== matches[matches.length - 1][0]) return 'champion';
-  if (!loggedIn && !isAnonVoter(voter)) return 'voter';
+// POST /cups/:id/play 본문 검사. itemIds = 그 월드컵의 항목 id 들. 틀리면 { reason, index? }, 맞으면 null.
+// entrants: 서로 다른 항목 2개 이상(항목 수 이하) — 2의 거듭제곱이 아니면 앞의 n − P 경기가 예선, 나머지는 부전승.
+// matches: [이긴 id, 진 id] 를 치른 순서대로 entrants − 1 개, 라운드 순서 (bracket.js 의 checkBracket).
+// champion 은 마지막 경기의 승자.
+export function playError(body, itemIds, loggedIn = false) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { reason: 'body' };
+  const bad = checkBracket(body, id => itemIds.has(id), itemIds.size);
+  if (bad) return bad;
+  if (!loggedIn && !isAnonVoter(body.voter)) return { reason: 'voter' };
   return null;
 }
+// 이유만 (문자열 또는 null)
+export const validatePlay = (body, itemIds, loggedIn) => playError(body, itemIds, loggedIn)?.reason ?? null;
 
-// 경기 목록 → { 항목id: [이긴 수, 진 수] } (출전 항목 모두 포함)
+// 경기 목록 → { 항목id: [이긴 수, 진 수, 진출도] } (출전 항목 모두 포함). 진출도는 bracket.js 의 bracketStats.
 export function tallyMatches(entrants, matches) {
-  const tally = Object.fromEntries(entrants.map(id => [id, [0, 0]]));
-  for (const [w, l] of matches) { tally[w][0]++; tally[l][1]++; }
-  return tally;
+  const { items } = bracketStats(entrants, matches);
+  return Object.fromEntries(Object.entries(items).map(([id, s]) => [id, [s.w, s.l, s.p]]));
 }
 
 // 이미지 형식: Content-Type 과 파일 앞부분(매직 바이트)이 맞아야 한다
@@ -421,9 +412,12 @@ async function getCup(c, id) {
   const row = await findCup(c, id);
   if (!row) return notFound(c);
   const { results } = await c.env.DB.prepare(
-    'SELECT id, name, img, champ, entries, wins, losses FROM cup_items WHERE cup_id = ?1 ORDER BY pos'
+    'SELECT id, name, img, champ, entries, wins, losses, expected, progress, tracked, tracked_champ FROM cup_items WHERE cup_id = ?1 ORDER BY pos'
   ).bind(id).all();
-  const items = results.map(r => ({ id: r.id, name: r.name, img: r.img ?? null, champ: r.champ, entries: r.entries, wins: r.wins, losses: r.losses }));
+  const items = results.map(r => ({
+    id: r.id, name: r.name, img: r.img ?? null, champ: r.champ, entries: r.entries, wins: r.wins, losses: r.losses,
+    expected: round4(r.expected || 0), progress: round4(r.progress || 0), tracked: r.tracked || 0, trackedChamp: r.tracked_champ || 0,
+  }));
   return c.send({ cup: cupOut(row, c.user), items });
 }
 
@@ -467,10 +461,14 @@ async function deleteCup(c, id) {
 }
 
 // 한 판이 끝나면 화면이 출전 항목·경기 결과·우승 항목을 보낸다. 투표자는 저장하지 않는다 (/versus/tournament 처럼).
-// 출전 항목마다 entries + 1, 우승 항목 champ + 1, 경기마다 wins/losses. 승패는 JSON 객체 하나로 넘긴다.
+// 출전 항목마다 entries + 1, 우승 항목 champ + 1, 경기마다 wins/losses, 그리고 대진 크기를 반영한 수치
+// expected + 1/n, progress + 진출도, tracked + 1, tracked_champ + 우승 (bracket.js, play.js 의 TOURNAMENT_SQL 과 같은 뜻).
+// 승패·진출도는 JSON 객체 하나로 넘긴다.
 const PLAY_SQL = `
 UPDATE cup_items SET entries = entries + 1, champ = champ + (id = ?2),
-  wins = wins + json_extract(?3, '$.' || id || '[0]'), losses = losses + json_extract(?3, '$.' || id || '[1]')
+  wins = wins + json_extract(?3, '$.' || id || '[0]'), losses = losses + json_extract(?3, '$.' || id || '[1]'),
+  progress = progress + json_extract(?3, '$.' || id || '[2]'), expected = expected + ?4,
+  tracked = tracked + 1, tracked_champ = tracked_champ + (id = ?2)
 WHERE cup_id = ?1 AND id IN (SELECT key FROM json_each(?3))`;
 
 async function playCup(c, id) {
@@ -480,16 +478,16 @@ async function playCup(c, id) {
   const row = await findCup(c, id);
   if (!row) return notFound(c);
   const { results } = await env.DB.prepare('SELECT id FROM cup_items WHERE cup_id = ?1').bind(id).all();
-  const reason = validatePlay(body, new Set(results.map(r => r.id)), Boolean(user));
+  const err = playError(body, new Set(results.map(r => r.id)), Boolean(user));
   // 세션이 만료됐는데 voter 없이 보냈다면 다시 로그인하라고 알린다 (/balance 와 같다)
-  if (reason === 'voter' && request.headers.has('Authorization')) return c.send({ error: 'auth' }, 401);
-  if (reason) return bad(c, reason);
+  if (err?.reason === 'voter' && request.headers.has('Authorization')) return c.send({ error: 'auth' }, 401);
+  if (err) return bad(c, err.reason, err.index === undefined ? undefined : { index: err.index });
   if (await rateLimited(env, await ipHashOf(request, env), PLAY_RATE, 'cupplay')) return c.send({ error: 'rate_limited' }, 429);
 
   const tally = tallyMatches(body.entrants, body.matches);
   await env.DB.batch([
     env.DB.prepare('UPDATE cups SET plays = plays + 1 WHERE id = ?1').bind(id),
-    env.DB.prepare(PLAY_SQL).bind(id, body.champion, JSON.stringify(tally)),
+    env.DB.prepare(PLAY_SQL).bind(id, body.champion, JSON.stringify(tally), 1 / body.entrants.length),
   ]);
   return c.send({ ok: true });
 }

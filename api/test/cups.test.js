@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   handleCups, cleanLine, cleanText, refKind, imageIdsOf, validateCup, validateCupPatch, cupSample,
-  validatePlay, tallyMatches, imageTypeOf, IMAGE_TYPES, imageId, MAX_IMAGE_BYTES,
+  validatePlay, playError, tallyMatches, imageTypeOf, IMAGE_TYPES, imageId, MAX_IMAGE_BYTES,
 } from '../src/cups.js';
 import { handleAccount } from '../src/account.js';
 import { corsHeaders } from '../src/http.js';
-import { makeTestKey, googlePayload, makeD1 } from './helpers.js';
+import { makeTestKey, googlePayload, makeD1, playBracket } from './helpers.js';
 
 const keys = new Set(['cards/bash', 'cards/strike', 'relics/anchor']);
 const HEX = 'a'.repeat(32);
@@ -105,7 +105,8 @@ test('한 판 결과 검사', () => {
   assert.equal(validatePlay(b, ids), 'voter');
   assert.equal(validatePlay({ ...b, voter: 'u_abcdefgh123' }, ids), 'voter');
   assert.equal(validatePlay(null, ids, true), 'body');
-  assert.equal(validatePlay({ ...b, entrants: ['i1', 'i2', 'i3'] }, ids, true), 'entrants');
+  assert.equal(validatePlay({ ...b, entrants: ['i1', 'i2', 'i3'] }, ids, true), 'matches'); // 3개도 되지만(예선 1 + 결승) 경기 수가 틀림
+  assert.equal(validatePlay({ ...b, entrants: ['i1'] }, ids, true), 'entrants');
   assert.equal(validatePlay(bracket(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8']), new Set(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7']), true), 'entrants'); // 항목 수보다 많다
   assert.equal(validatePlay({ ...b, entrants: ['i1', 'i2', 'i3', 'x'] }, ids, true), 'item');
   assert.equal(validatePlay({ ...b, entrants: ['i1', 'i2', 'i3', 'i3'] }, ids, true), 'duplicate');
@@ -118,8 +119,27 @@ test('한 판 결과 검사', () => {
   assert.equal(validatePlay({ ...b, champion: 'i3' }, ids, true), 'champion');
   const big = Array.from({ length: 64 }, (_, i) => `i${i + 1}`);
   assert.equal(validatePlay(bracket(big, (x, y) => y), new Set(big), true), null);
-  assert.deepEqual(tallyMatches(four, b.matches), { i1: [2, 0], i2: [0, 1], i3: [1, 1], i4: [0, 1] });
-  assert.deepEqual(tallyMatches(four, [['i1', 'i2'], ['i3', 'i4'], ['i3', 'i1']]), { i1: [1, 1], i2: [0, 1], i3: [2, 0], i4: [0, 1] });
+  assert.deepEqual(tallyMatches(four, b.matches), { i1: [2, 0, 1], i2: [0, 1, 0], i3: [1, 1, 0.5], i4: [0, 1, 0] });
+  assert.deepEqual(tallyMatches(four, [['i1', 'i2'], ['i3', 'i4'], ['i3', 'i1']]), { i1: [1, 1, 0.5], i2: [0, 1, 0], i3: [2, 0, 1], i4: [0, 1, 0] });
+  // 전체 참가(2의 거듭제곱이 아님): 5·6·12·37개, 그리고 64개
+  for (const n of [5, 6, 12, 37, 64]) {
+    const all = Array.from({ length: n }, (_, i) => `i${i + 1}`);
+    const set = new Set(all);
+    assert.equal(validatePlay(playBracket(all), set, true), null, `n=${n}`);
+    assert.equal(validatePlay(playBracket(all, (x, y) => y), set, true), null, `n=${n}`);
+    assert.equal(validatePlay(playBracket(all), new Set([...all.slice(1), 'zz']), true), 'item', `n=${n}`); // 없는 항목
+    assert.equal(validatePlay(playBracket([...all, 'i999']), set, true), 'entrants', `n=${n}`); // 항목 수 초과
+  }
+  // 예선(앞의 1경기)에 이어 같은 항목이 본선 같은 라운드에 두 번 → round
+  const five = ['i1', 'i2', 'i3', 'i4', 'i5'];
+  assert.deepEqual(playError({ entrants: five, champion: 'i1', matches: [['i1', 'i2'], ['i1', 'i3'], ['i1', 'i4'], ['i1', 'i5']] }, ids, true), { reason: 'round', index: 2 });
+  // 6개: 예선 2경기에 같은 항목 → prelim
+  const six = ['i1', 'i2', 'i3', 'i4', 'i5', 'i6'];
+  assert.deepEqual(playError({ entrants: six, champion: 'i1', matches: [['i1', 'i2'], ['i1', 'i3'], ['i4', 'i5'], ['i6', 'i4'], ['i1', 'i6']] }, ids, true), { reason: 'prelim', index: 1 });
+  // n=5 진출도: 예선 i1>i2, 준결승 i3>i1, i4>i5, 결승 i3>i4 → i1 1/3, i2 0, i3 1, i4 2/3, i5 1/3 (부전승은 예선 라운드를 이긴 셈)
+  const t5 = tallyMatches(five, [['i1', 'i2'], ['i3', 'i1'], ['i4', 'i5'], ['i3', 'i4']]);
+  assert.deepEqual(Object.fromEntries(Object.entries(t5).map(([k, v]) => [k, [v[0], v[1], Math.round(v[2] * 1e6) / 1e6]])),
+    { i1: [1, 1, 0.333333], i2: [0, 1, 0], i3: [2, 0, 1], i4: [1, 1, 0.666667], i5: [0, 1, 0.333333] });
 });
 
 test('이미지 형식', async () => {
@@ -262,7 +282,9 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   r = await call('GET', `/cups/${cup.id}`);
   assert.deepEqual(r.data.cup, { ...cup, mine: false });
   assert.deepEqual(r.data.items.map(it => [it.id, it.name, it.img]), items.map((it, i) => [`i${i + 1}`, it.name, it.img ?? null]));
-  assert.deepEqual(r.data.items[0], { id: 'i1', name: '첫째', img: null, champ: 0, entries: 0, wins: 0, losses: 0 });
+  assert.deepEqual(r.data.items[0], {
+    id: 'i1', name: '첫째', img: null, champ: 0, entries: 0, wins: 0, losses: 0, expected: 0, progress: 0, tracked: 0, trackedChamp: 0,
+  });
   assert.equal((await call('GET', `/cups/${'0'.repeat(24)}`)).status, 404);
   assert.equal((await call('GET', '/cups/x')).status, 404);
 
@@ -313,6 +335,27 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
     i1: [1, 1, 3, 0], i2: [0, 1, 0, 1], i3: [0, 1, 1, 1], i4: [0, 1, 0, 1],
     i5: [0, 2, 2, 2], i6: [0, 2, 1, 2], i7: [0, 2, 1, 2], i8: [1, 2, 2, 1],
   });
+  // 대진 크기를 반영한 수치: 8강(i1 우승) + 4강(i8 우승)
+  const sx = id => { const it = r.data.items.find(x => x.id === id); return [it.expected, it.progress, it.tracked, it.trackedChamp]; };
+  assert.deepEqual(sx('i1'), [0.125, 1, 1, 1]);
+  assert.deepEqual(sx('i2'), [0.125, 0, 1, 0]);
+  assert.deepEqual(sx('i3'), [0.125, 0.3333, 1, 0]);   // 8강에서 1승 (3라운드 중 1)
+  assert.deepEqual(sx('i5'), [0.375, 0.6667, 2, 0]);   // 1/8 + 1/4, 1/3 + 1/3
+  assert.deepEqual(sx('i8'), [0.375, 1, 2, 1]);        // 8강 첫 경기 탈락(0) + 4강 우승(1)
+  // 전체 참가 5개 (예선 1경기, 부전승 3개): i1>i2 예선, i3>i1, i4>i5, i3>i4
+  const full5 = { entrants: ['i1', 'i2', 'i3', 'i4', 'i5'], champion: 'i3', matches: [['i1', 'i2'], ['i3', 'i1'], ['i4', 'i5'], ['i3', 'i4']] };
+  assert.deepEqual((await play(full5, { token: B, ipAddr: '10.5.0.4' })).data, { ok: true });
+  // 예선 구조가 틀린 6개 판은 400 + 경기 위치
+  const bad6 = { entrants: ['i1', 'i2', 'i3', 'i4', 'i5', 'i6'], champion: 'i1', matches: [['i1', 'i2'], ['i1', 'i3'], ['i4', 'i5'], ['i6', 'i4'], ['i1', 'i6']] };
+  assert.deepEqual((await play(bad6, { token: B, ipAddr: '10.5.0.4' })).data, { error: 'bad_request', reason: 'prelim', index: 1 });
+  r = await call('GET', `/cups/${cup.id}`);
+  assert.equal(r.data.cup.plays, 3);
+  assert.deepEqual(sx('i2'), [0.325, 0, 2, 0]);        // 1/8 + 1/5, 예선 탈락 0
+  assert.deepEqual(sx('i3'), [0.325, 1.3333, 2, 1]);   // 부전승 우승 → 1
+  assert.deepEqual(sx('i5'), [0.575, 1, 3, 0]);        // 부전승 후 준결승 탈락 1/3
+  assert.deepEqual(sx('i6'), [0.375, 0.5, 2, 0]);      // 이번 판에는 나오지 않음 (8강 0 + 4강 준우승 1/2)
+  assert.deepEqual(sx('i1').slice(1), [1.3333, 2, 1]); // 예선 승 → 준결승 탈락 1/3
+
   // IP 당 1분 6판
   const plays = [];
   for (let i = 0; i < 7; i++) plays.push((await play(four2, { token: B, ipAddr: '10.5.0.3' })).status);
