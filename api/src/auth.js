@@ -121,13 +121,16 @@ export async function verifyGoogleIdToken(token, { clientId, getKey, now = Date.
   return { ok: true, payload };
 }
 
-export function isAdmin(env, googleSub) {
-  return (env.ADMIN_SUBS || '').split(',').map(s => s.trim()).filter(Boolean).includes(googleSub);
+const listOf = v => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+
+// 관리자: 구글 sub 이 ADMIN_SUBS 에 있거나, 사용자 id(users.id)가 ADMIN_USERS 에 있으면
+export function isAdmin(env, googleSub, userId = null) {
+  return listOf(env.ADMIN_SUBS).includes(googleSub) || (userId !== null && listOf(env.ADMIN_USERS).includes(userId));
 }
 
 // users 행 → 밖으로 내보내는 user
 export function publicUser(row, env) {
-  return { id: row.id, name: row.name, picture: row.picture || null, admin: isAdmin(env, row.google_sub) };
+  return { id: row.id, name: row.name, picture: row.picture || null, admin: isAdmin(env, row.google_sub, row.id) };
 }
 
 export function bearerToken(request) {
