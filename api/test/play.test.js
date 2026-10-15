@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   templateCategory, tierScore, aggregateStates, finalizeAggregate,
   validateVersus, normalizePair, eloDelta, ELO_K,
+  validateTournament, mergeRanking, BRACKET_SIZES,
 } from '../src/play.js';
 
 const keys = new Set(['cards/bash', 'cards/strike', 'cards/defend', 'relics/anchor', 'relics/vajra']);
@@ -65,6 +66,43 @@ test('대결 입력 검사', () => {
   assert.equal(validateVersus({ ...ok, voter: 'a b c d e f g h' }, keys), 'voter');
 });
 
+test('월드컵 결과 입력 검사', () => {
+  const many = new Set([...keys, ...Array.from({ length: 70 }, (_, i) => `relics/r${i}`)]);
+  const ok = { category: 'cards', champion: 'bash', entrants: ['strike', 'bash', 'defend', 'zap'], voter };
+  const k4 = new Set([...keys, 'cards/zap']);
+  assert.equal(validateTournament(ok, k4), null);
+  assert.equal(validateTournament({ ...ok, voter: undefined }, k4, true), null);
+  assert.equal(validateTournament(null, k4), 'body');
+  assert.equal(validateTournament({ ...ok, category: 'potions' }, k4), 'category');
+  assert.equal(validateTournament({ ...ok, entrants: 'bash' }, k4), 'entrants');
+  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend'] }, k4), 'entrants');   // 3강은 없다
+  assert.equal(validateTournament({ ...ok, entrants: [] }, k4), 'entrants');
+  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 'anchor'] }, k4), 'item'); // 다른 카테고리
+  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 3] }, k4), 'item');
+  assert.equal(validateTournament({ ...ok, entrants: ['bash', 'strike', 'defend', 'bash'] }, k4), 'duplicate');
+  assert.equal(validateTournament({ ...ok, champion: 'nope' }, k4), 'champion');
+  assert.equal(validateTournament({ ...ok, champion: ['bash'] }, k4), 'champion');
+  assert.equal(validateTournament({ ...ok, voter: 'u_0123456789abcdef' }, k4), 'voter');
+  assert.deepEqual(BRACKET_SIZES, [4, 8, 16, 32, 64]);
+  for (const n of [8, 16, 32, 64]) {
+    const entrants = Array.from({ length: n }, (_, i) => `r${i}`);
+    assert.equal(validateTournament({ category: 'relics', champion: 'r0', entrants, voter }, many), null);
+  }
+  const e128 = Array.from({ length: 70 }, (_, i) => `r${i}`);
+  assert.equal(validateTournament({ category: 'relics', champion: 'r0', entrants: e128, voter }, many), 'entrants');
+});
+
+test('순위: Elo 와 월드컵 수치를 합친다', () => {
+  const items = mergeRanking(
+    [{ item: 'bash', rating: 1512.34, wins: 1, losses: 0 }, { item: 'gone', rating: 1400, wins: 0, losses: 1 }],
+    [{ item: 'bash', champ: 2, entries: 5 }, { item: 'defend', champ: 0, entries: 1 }, { item: 'gone', champ: 1, entries: 1 }],
+    'cards', keys);
+  assert.deepEqual(items, {
+    bash: { rating: 1512.3, wins: 1, losses: 0, champ: 2, entries: 5 },
+    defend: { rating: 1500, wins: 0, losses: 0, champ: 0, entries: 1 },
+  });
+});
+
 test('쌍 정렬', () => {
   assert.deepEqual(normalizePair('strike', 'bash'), ['bash', 'strike']);
   assert.deepEqual(normalizePair('bash', 'strike'), ['bash', 'strike']);
@@ -118,6 +156,16 @@ test('e2e: A vs B 투표·재투표·순위·속도 제한', { skip: !E2E && 'PL
   const agg = await fetch(`${E2E}/tiers/aggregate?template=potions`).then(r => r.json());
   assert.equal(agg.template, 'potions');
   assert.equal(typeof agg.count, 'number');
+
+  // 월드컵 결과: 출전 4개 → entries +1, 우승 → champ +1 (순위는 캐시라 여기서는 응답만 본다)
+  const cup = async body => {
+    const res = await fetch(`${E2E}/versus/tournament`, { method: 'POST', headers: { 'CF-Connecting-IP': `${ip}9` }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+  const four = JSON.parse(keysJson).filter(k => k.startsWith('potions/')).slice(0, 4).map(k => k.slice(8));
+  assert.deepEqual(await cup({ category: 'potions', champion: four[2], entrants: four, voter: me }), { status: 200, body: { ok: true } });
+  assert.deepEqual((await cup({ category: 'potions', champion: 'nope', entrants: four, voter: me })).body, { error: 'bad_request', reason: 'champion' });
+  assert.equal((await fetch(`${E2E}/versus/tournament`)).status, 405);
 
   // 이 IP 로 이미 3번 성공 → 57번 더 되고 그다음부터 429 (분이 바뀌어도 128번이면 한 분에 60번을 넘는다)
   const minute = () => Math.floor(Date.now() / 60000);

@@ -20,8 +20,15 @@ const ITEM_ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const ID_RE = /^[0-9a-f]{24}$/;      // 글·댓글 id (12바이트 hex)
 const USER_ID_RE = /^[0-9a-f]{32}$/;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+// 갤러리 글 종류. 'balance' 글은 밸런스 투표(너프/적당/버프 3줄, 색 고정)를 티어표와 같은 모양으로 담는다.
+const POST_KINDS = ['tier', 'balance'];
+export const BALANCE_ROWS = [
+  { label: 'nerf', color: '#e5484d' },
+  { label: 'fair', color: '#b9ae95' },
+  { label: 'buff', color: '#57a7d8' },
+];
 // 제어 문자와 글자 방향 바꾸기 문자(이름·댓글로 화면을 속이지 못하게). 줄바꿈은 따로 다룬다.
-const UNSAFE_CHARS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩﻿]/g;
+export const UNSAFE_CHARS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩﻿]/g;
 
 const len = s => [...s].length; // 글자 수 = 코드 포인트 수 (이모지·한글이 1자)
 
@@ -150,6 +157,23 @@ export function normalizeState(s) {
   return { state };
 }
 
+// 밸런스 투표 글의 state 검사: 정확히 nerf/fair/buff 3줄(정해진 색), 항목은 겹치지 않고 그 카테고리에 있는 것.
+// normalizeState 를 통과한 state 를 받는다. → { state } | { reason }
+export function normalizeBalanceState(state, category, keys) {
+  if (state.tiers.length !== BALANCE_ROWS.length) return { reason: 'state.tiers' };
+  const seen = new Set();
+  for (let i = 0; i < BALANCE_ROWS.length; i++) {
+    const t = state.tiers[i];
+    if (t.label !== BALANCE_ROWS[i].label) return { reason: 'state.label' };
+    if (t.color.toLowerCase() !== BALANCE_ROWS[i].color) return { reason: 'state.color' };
+    for (const id of t.items) {
+      if (seen.has(id) || !keys.has(`${category}/${id}`)) return { reason: 'state.items' };
+      seen.add(id);
+    }
+  }
+  return { state: { ...state, tiers: state.tiers.map((t, i) => ({ ...t, color: BALANCE_ROWS[i].color })) } };
+}
+
 // 구글 이름 앞부분으로 처음 이름을 정한다. 너무 짧으면 무작위 이름.
 function initialName(payload) {
   const raw = typeof payload.name === 'string' ? payload.name : '';
@@ -262,12 +286,13 @@ async function deleteTier(c, template) {
 
 // ---------- 갤러리 ----------
 
-const POST_COLUMNS = `p.id, p.user_id, p.template, p.title, p.state, p.created, p.likes, p.dislikes, p.comments, p.hidden,
+const POST_COLUMNS = `p.id, p.user_id, p.kind, p.template, p.title, p.state, p.created, p.likes, p.dislikes, p.comments, p.hidden,
   u.name AS a_name, u.picture AS a_picture`;
 
 function postOut(r) {
   return {
     id: r.id,
+    kind: r.kind || 'tier',
     template: r.template,
     title: r.title,
     state: parseState(r.state),
@@ -300,10 +325,13 @@ async function createPost(c) {
   if (await limited(c, 'post')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, MAX_BODY_BYTES);
   if (res) return res;
+  const kind = body.kind ?? 'tier';
+  if (!POST_KINDS.includes(kind)) return bad(c, 'kind');
   if (!isTemplateId(body.template, c.keys)) return bad(c, 'template');
   const title = cleanTitle(body.title);
   if (!title) return bad(c, 'title');
-  const { state, reason } = normalizeState(body.state);
+  let { state, reason } = normalizeState(body.state);
+  if (state && kind === 'balance') ({ state, reason } = normalizeBalanceState(state, body.template.split('.')[0], c.keys));
   if (!state) return reason === 'state.size' ? c.send({ error: 'too_large' }, 413) : bad(c, reason);
   if (!state.tiers.some(t => t.items.length)) return bad(c, 'empty');
 
@@ -315,17 +343,18 @@ async function createPost(c) {
   const id = randomHex(12);
   state.updatedAt = now;
   await env.DB.prepare(
-    `INSERT INTO posts (id, user_id, template, title, state, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
-  ).bind(id, user.id, body.template, title, JSON.stringify(state), now).run();
+    `INSERT INTO posts (id, user_id, kind, template, title, state, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+  ).bind(id, user.id, kind, body.template, title, JSON.stringify(state), now).run();
   return c.send({
     post: {
-      id, template: body.template, title, state, author: { id: user.id, name: user.name, picture: user.picture },
+      id, kind, template: body.template, title, state, author: { id: user.id, name: user.name, picture: user.picture },
       created: now, likes: 0, dislikes: 0, comments: 0, myReaction: 0, hidden: false,
     },
   });
 }
 
 // cursor 는 마지막 글의 정렬 키: new → 'created:id', top → 'score:created:id'
+// kind 를 주지 않으면 티어표만 (kind 를 모르는 예전 화면이 밸런스 글을 티어표로 그리지 않게).
 async function listPosts(c) {
   const { env, url } = c;
   c.user = await getUser(c.request, env);
@@ -334,13 +363,15 @@ async function listPosts(c) {
   const author = q.get('author') || null;
   const sort = q.get('sort') || 'new';
   const cursor = q.get('cursor') || null;
+  const kind = q.get('kind') || 'tier';
+  if (!POST_KINDS.includes(kind)) return bad(c, 'kind');
   if (template && !isTemplateId(template, c.keys)) return bad(c, 'template');
   if (author && !USER_ID_RE.test(author)) return bad(c, 'author');
   if (sort !== 'new' && sort !== 'top') return bad(c, 'sort');
 
   // WHERE 는 고정된 조각만 이어 붙이고 값은 모두 bind 로 넘긴다
-  const where = [];
-  const params = [c.user?.id ?? ''];
+  const where = ['p.kind = ?'];
+  const params = [c.user?.id ?? '', kind];
   if (template) { where.push('p.template = ?'); params.push(template); }
   if (author) { where.push('p.user_id = ?'); params.push(author); }
   if (!c.user?.admin) { where.push('(p.hidden = 0 OR p.user_id = ?)'); params.push(c.user?.id ?? ''); }
@@ -359,7 +390,7 @@ async function listPosts(c) {
   const { results } = await env.DB.prepare(
     `SELECT ${POST_COLUMNS}, COALESCE(r.v, 0) AS my FROM posts p JOIN users u ON u.id = p.user_id
      LEFT JOIN reactions r ON r.post_id = p.id AND r.user_id = ?
-     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     WHERE ${where.join(' AND ')}
      ORDER BY ${order} LIMIT ${PAGE_SIZE + 1}`
   ).bind(...params).all();
 
@@ -424,11 +455,15 @@ async function reactPost(c, id) {
 
 // ---------- 댓글 ----------
 
-// 글의 댓글 수 = 지워지지도 숨겨지지도 않은 댓글
-function recountPostComments(env, postId) {
+// 댓글 수 = 지워지지도 숨겨지지도 않은 댓글. 수를 들고 있는 대상(글·사용자 월드컵)이면 다시 세는 문장, 아니면 null.
+const COUNTED_TARGETS = { post: 'posts', cup: 'cups' };
+function recountComments(env, target) {
+  const i = target.indexOf(':');
+  const table = COUNTED_TARGETS[target.slice(0, i)];
+  if (!table) return null;
   return env.DB.prepare(
-    `UPDATE posts SET comments = (SELECT COUNT(*) FROM comments WHERE target = ?2 AND deleted = 0 AND hidden = 0) WHERE id = ?1`
-  ).bind(postId, `post:${postId}`);
+    `UPDATE ${table} SET comments = (SELECT COUNT(*) FROM comments WHERE target = ?2 AND deleted = 0 AND hidden = 0) WHERE id = ?1`
+  ).bind(target.slice(i + 1), target);
 }
 
 function commentOut(r, user) {
@@ -445,8 +480,8 @@ function commentOut(r, user) {
   };
 }
 
-// item 이 있으면 작성자가 그 항목에 낸 밸런스 표(vote)를 같이 읽는다
-async function listComments(c, target, { item = null, order }) {
+// item 이 있으면 작성자가 그 항목에 낸 밸런스 표(vote)를 같이 읽는다. cups.js 도 쓴다.
+export async function listComments(c, target, { item = null, order }) {
   const me = c.user?.id ?? '';
   const visible = c.user?.admin ? '' : 'AND (c.hidden = 0 OR c.user_id = ?3)';
   const { results } = await c.env.DB.prepare(
@@ -461,7 +496,7 @@ async function listComments(c, target, { item = null, order }) {
   return c.send({ comments: results.map(r => commentOut(r, c.user)) });
 }
 
-async function addComment(c, target, item = null) {
+export async function addComment(c, target, item = null) {
   const { env, user } = c;
   if (await limited(c, 'comment')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, SMALL_BODY_BYTES);
@@ -475,7 +510,8 @@ async function addComment(c, target, item = null) {
     env.DB.prepare('INSERT INTO comments (id, target, user_id, body, created) VALUES (?1, ?2, ?3, ?4, ?5)')
       .bind(id, target, user.id, text, now),
   ];
-  if (target.startsWith('post:')) stmts.push(recountPostComments(env, target.slice(5)));
+  const recount = recountComments(env, target);
+  if (recount) stmts.push(recount);
   await env.DB.batch(stmts);
 
   let vote = null;
@@ -531,7 +567,8 @@ async function deleteComment(c, id) {
   if (!row) return notFound(c);
   if (!canModify(row, c.user)) return c.send({ error: 'forbidden' }, 403);
   const stmts = [env.DB.prepare(`UPDATE comments SET body = '', deleted = 1 WHERE id = ?1`).bind(id)];
-  if (row.target.startsWith('post:')) stmts.push(recountPostComments(env, row.target.slice(5)));
+  const recount = recountComments(env, row.target);
+  if (recount) stmts.push(recount);
   await env.DB.batch(stmts);
   return c.send({ ok: true });
 }
@@ -557,13 +594,21 @@ async function likeComment(c, id) {
 
 // ---------- 신고 ----------
 
+// 신고할 수 있는 것과 그 표. 'cup' 은 사용자 월드컵 (cups.js, 0005).
+const REPORT_TABLES = { post: 'posts', comment: 'comments', cup: 'cups' };
+
+async function findCupRow(c, id) {
+  const row = await c.env.DB.prepare('SELECT id, user_id, hidden FROM cups WHERE id = ?1').bind(id).first();
+  return row && canSee(row, c.user) ? row : null;
+}
+
 async function report(c) {
   const { env, user } = c;
   if (await limited(c, 'report')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, SMALL_BODY_BYTES);
   if (res) return res;
   const { kind, id } = body;
-  if (kind !== 'post' && kind !== 'comment') return bad(c, 'kind');
+  if (!Object.hasOwn(REPORT_TABLES, kind)) return bad(c, 'kind');
   if (typeof id !== 'string' || !ID_RE.test(id)) return bad(c, 'id');
   let reason = null;
   if (body.reason !== undefined && body.reason !== null && body.reason !== '') {
@@ -571,11 +616,11 @@ async function report(c) {
     if (!reason || len(reason) > 200) return bad(c, 'reason');
   }
 
-  const row = kind === 'post' ? await findPost(c, id) : await findComment(c, id);
+  const row = kind === 'post' ? await findPost(c, id) : kind === 'cup' ? await findCupRow(c, id) : await findComment(c, id);
   if (!row) return notFound(c);
 
   // 신고를 넣고, 같은 대상 신고가 REPORTS_TO_HIDE 건이면 숨긴다 (한 batch 라 동시에 와도 수가 맞다)
-  const table = kind === 'post' ? 'posts' : 'comments';
+  const table = REPORT_TABLES[kind];
   const stmts = [
     env.DB.prepare('INSERT OR IGNORE INTO reports (kind, target_id, user_id, reason, created) VALUES (?1, ?2, ?3, ?4, ?5)')
       .bind(kind, id, user.id, reason, Date.now()),
@@ -584,7 +629,8 @@ async function report(c) {
        AND (SELECT COUNT(*) FROM reports WHERE kind = ?2 AND target_id = ?1) >= ?3`
     ).bind(id, kind, REPORTS_TO_HIDE),
   ];
-  if (kind === 'comment' && row.target.startsWith('post:')) stmts.push(recountPostComments(env, row.target.slice(5)));
+  const recount = kind === 'comment' && recountComments(env, row.target);
+  if (recount) stmts.push(recount);
   await env.DB.batch(stmts);
   return c.send({ ok: true });
 }

@@ -1,4 +1,4 @@
-/* 모두의 티어표·A vs B 대결 (play 에이전트) */
+/* 모두의 티어표·월드컵 (play 에이전트). 월드컵 엔진(worldcup.js)의 .cup-* 도 여기 */
 
 /* ================================================================ 모두의 티어표 */
 .board .tile.agg-few { opacity: .42; filter: grayscale(.55); }
@@ -12,7 +12,7 @@
 .board.readonly .pool .pool-head { margin-bottom: 8px; }
 .board.readonly .pool .pool-head h3 { font-size: 16px; }
 
-/* ================================================================ 홈: 대결 안내 한 줄 */
+/* ================================================================ 홈: 월드컵 안내 한 줄 */
 .vs-promo-wrap { margin-top: 18px; }
 .vs-promo {
   display: flex; align-items: center; gap: 12px;
@@ -31,7 +31,7 @@
 .vs-promo-text span { font-size: 13.5px; color: var(--muted); line-height: 1.45; }
 .vs-promo-go { flex-shrink: 0; }
 
-/* ================================================================ A vs B 대결 */
+/* ================================================================ 월드컵 */
 .vs-head {
   display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
   gap: 8px 16px; margin-bottom: 12px;
@@ -130,16 +130,97 @@
   box-shadow: 0 0 22px rgba(217, 164, 65, .25);
 }
 .vs-info { align-self: center; }
-.vs-actions { display: flex; justify-content: center; margin-top: 16px; }
-.vs-skip { min-width: 140px; }
-.vs-kbd { padding: 0 5px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .18); font-size: 12px; }
 .vs-last { min-height: 1.6em; margin: 10px 0 0; font-size: 13.5px; color: var(--muted); }
 .vs-last strong { color: var(--gold-hi); }
 .vs-last-label { opacity: .85; }
 .vs-keys { margin: 2px 0 0; font-size: 12px; color: var(--muted); opacity: .8; }
-.vs-done h2 { margin-top: 0; }
+.vs-head-group { color: var(--muted); font-size: .8em; }
+
+/* 대진 크기 고르기 */
+.cup-picker { text-align: center; max-width: 640px; margin: 0 auto; padding: 8px 0 4px; }
+.cup-picker-lead { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: var(--text); }
+.cup-sizes { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.cup-size {
+  flex: 0 1 108px; min-width: 88px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 12px 10px 10px; border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, .14); background: var(--panel);
+  color: var(--muted); cursor: pointer; font: inherit;
+  transition: border-color .12s ease, transform .12s ease, background .12s ease;
+}
+.cup-size strong { font-family: var(--font-game); font-size: 22px; line-height: 1.1; color: var(--text); }
+.cup-size span { font-size: 12px; font-variant-numeric: tabular-nums; }
+.cup-size:hover { border-color: rgba(255, 255, 255, .3); }
+.cup-size.on {
+  border-color: var(--gold); color: var(--gold-hi);
+  background: linear-gradient(180deg, rgba(217, 164, 65, .22), rgba(217, 164, 65, .06)), var(--panel);
+  box-shadow: 0 0 0 1px var(--gold), 0 8px 22px rgba(0, 0, 0, .35);
+}
+.cup-size.on strong { color: var(--gold-hi); }
+.cup-picker-note { margin: 14px 0 0; font-size: 13px; }
+.cup-start-wrap { margin: 16px 0 0; }
+.cup-start { min-width: 200px; font-size: 16px; padding: 10px 22px; }
+
+/* 경기 중: 라운드·진행 막대·되돌리기 */
+.cup-bar {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "status tools" "bar bar";
+  align-items: center; gap: 6px 12px;
+  max-width: 780px; margin: 0 auto 6px; text-align: left;
+}
+.cup-status { grid-area: status; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.cup-round { font-family: var(--font-game); font-weight: 700; font-size: 20px; color: var(--gold-hi); font-variant-numeric: tabular-nums; }
+.cup-count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cup-tools { grid-area: tools; display: flex; gap: 6px; }
+.cup-tools .btn[disabled] { opacity: .4; cursor: default; }
+.cup-abandon.armed { color: #ff8b8b; border-color: rgba(229, 72, 77, .6); }
+.cup-progress { grid-area: bar; height: 6px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.cup-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c48a28, #f0c76a); transition: width .2s ease; }
+
+/* 우승 화면 */
+.cup-champ { text-align: center; max-width: 780px; margin: 0 auto; animation: vs-in .25s ease; }
+.cup-champ-kicker { margin: 4px 0 0; font-size: 13px; color: var(--muted); letter-spacing: .02em; }
+.cup-champ-title { margin: 2px 0 12px; font-family: var(--font-title); font-size: clamp(28px, 5vw, 40px); color: var(--gold-hi); text-shadow: 0 0 24px rgba(240, 199, 106, .35); }
+.cup-champ-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  max-width: 420px; margin: 0 auto; padding: 20px 16px 16px; border-radius: 18px;
+  border: 1px solid var(--gold);
+  background: radial-gradient(80% 60% at 50% 30%, rgba(240, 199, 106, .2), transparent 70%), var(--panel);
+  box-shadow: 0 0 0 1px rgba(240, 199, 106, .25), 0 0 40px rgba(240, 199, 106, .18), 0 12px 32px rgba(0, 0, 0, .45);
+}
+.cup-champ-card .vs-media { height: 300px; }
+.cup-champ-card.kind-card .vs-media { height: clamp(240px, 42vh, 360px); }
+.cup-champ-card.kind-icon .vs-media { height: 140px; }
+.cup-champ-card.kind-icon .vs-media img { width: 128px; height: 128px; }
+.cup-champ-card.kind-icon .vs-noimg { width: 128px; height: 128px; }
+.cup-champ-card.kind-creature .vs-media, .cup-champ-card.kind-portrait .vs-media { height: clamp(200px, 36vh, 300px); }
+.cup-champ-name { font-size: 26px; }
+.cup-champ-card .tip-text { width: 100%; text-align: left; font-size: 13.5px; }
+.cup-after { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; margin: 18px 0 0; text-align: left; }
+.cup-road, .cup-runner { padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .08); background: var(--panel); min-width: 0; }
+.cup-road h3, .cup-runner h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); font-weight: 700; }
+.cup-road ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cup-road li, .cup-runner-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cup-road-round { flex: 0 0 4.6em; font-size: 12.5px; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+.cup-road li.final .cup-road-round { color: var(--gold-hi); }
+.cup-road-name { min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.cup-road .tile, .cup-runner .tile { flex-shrink: 0; cursor: default; --tile-w: 34px; --tile-h: 46px; --icon: 34px; --creature-w: 44px; --creature-h: 38px; }
+.cup-mini {
+  flex-shrink: 0; width: 38px; height: 38px; display: grid; place-items: center; overflow: hidden;
+  border-radius: 8px; background: #23262e; color: var(--muted); font-weight: 700;
+}
+.cup-mini img { width: 100%; height: 100%; object-fit: cover; }
+.cup-actions { justify-content: center; margin: 18px 0 0; flex-wrap: wrap; }
+
+/* 카드 '전체': 캐릭터 먼저 */
+.cup-groups h2 { margin-top: 0; }
+.cup-group-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.cup-group { padding: 9px 16px; font-size: 15px; color: var(--text); }
+.cup-group small { font-size: 12px; color: var(--muted); font-weight: 500; }
 
 /* 순위 */
+.vs-rank-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0 0 10px; }
+.vs-rank-head .vs-rank-status { margin: 0; }
+.vs-rank-sort button { padding: 5px 12px; }
 .vs-rank-status { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
 .vs-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .vs-rank-row {
@@ -164,7 +245,9 @@
 .vs-rank-name { font-family: var(--font-game); font-weight: 700; font-size: 15.5px; line-height: 1.25; color: var(--gold-hi); overflow-wrap: anywhere; }
 .vs-rank-bar { display: block; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, .08); overflow: hidden; }
 .vs-rank-bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c48a28, #f0c76a); }
-.vs-rank-sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vs-rank-bar.is-cup span { background: linear-gradient(90deg, #8a6bd8, #c9a6ff); }
+.vs-rank-sub { font-size: 12px; line-height: 1.5; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vs-rank-cup.has { color: var(--gold); }
 .vs-rank-rating { font-family: var(--font-game); font-weight: 700; font-size: 18px; color: var(--gold-hi); font-variant-numeric: tabular-nums; }
 .vs-more { margin: 14px 0 0; text-align: center; }
 .vs-rank-help { margin: 12px 0 0; font-size: 13px; }
@@ -196,12 +279,24 @@
   .vs-key { display: none; }
   .vs-pair.kind-icon .vs-noimg { width: 84px; height: 84px; }
   .vs-pick .tip-text { font-size: 12.5px; line-height: 1.45; }
-  .vs-skip { width: 100%; }
+  .cup-size { flex-basis: calc(33.333% - 7px); min-width: 0; padding: 10px 6px 8px; }
+  .cup-size strong { font-size: 19px; }
+  .cup-start { width: 100%; }
+  .cup-round { font-size: 17px; }
+  .cup-tools .btn { padding-left: 9px; padding-right: 9px; }
+  .cup-after { grid-template-columns: minmax(0, 1fr); }
+  .cup-champ-card { padding: 16px 12px 12px; }
+  .cup-champ-card .vs-media { height: 240px; }
+  .cup-champ-card.kind-card .vs-media { height: 260px; }
+  .cup-champ-card.kind-creature .vs-media, .cup-champ-card.kind-portrait .vs-media { height: 220px; }
+  .cup-champ-name { font-size: 22px; }
+  .cup-actions .btn { flex: 1 1 calc(50% - 8px); }
   .vs-rank-row { gap: 8px; padding: 6px 10px 6px 4px; }
   .vs-rank-no { flex-basis: 2em; font-size: 15px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vs-pair { animation: none; }
+  .vs-pair, .cup-champ { animation: none; }
+  .cup-progress span { transition: none; }
   .vs-pick, .vs-promo { transition: none; }
 }

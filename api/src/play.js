@@ -1,4 +1,4 @@
-// 모두의 티어표(집계)·A vs B 대결.
+// 모두의 티어표(집계)·A vs B 대결·월드컵(토너먼트).
 // 처리하는 경로면 Response, 아니면 null 을 돌려준다.
 import { json, ipHashOf, rateLimited, readJson } from './http.js';
 import { getUser } from './auth.js';
@@ -8,6 +8,8 @@ const AGGREGATE_TTL = 60;
 const RANKING_TTL = 30;
 const AGGREGATE_MAX_LISTS = 5000; // 최신 티어표 몇 개까지만 훑는다 (요청 비용 상한)
 const VERSUS_RATE_PER_MINUTE = 60;
+const TOURNAMENT_RATE_PER_MINUTE = 6;
+export const BRACKET_SIZES = [4, 8, 16, 32, 64];
 export const ELO_START = 1500;
 export const ELO_K = 24;
 
@@ -16,12 +18,13 @@ const TEMPLATE_RE = /^[a-z0-9][A-Za-z0-9.-]{0,79}$/;
 
 export async function handlePlay(request, env, ctx, { url, cors, keys }) {
   const path = url.pathname;
-  if (path !== '/tiers/aggregate' && path !== '/versus' && path !== '/versus/ranking') return null;
-  const method = path === '/versus' ? 'POST' : 'GET';
+  if (path !== '/tiers/aggregate' && path !== '/versus' && path !== '/versus/ranking' && path !== '/versus/tournament') return null;
+  const method = path === '/versus' || path === '/versus/tournament' ? 'POST' : 'GET';
   if (request.method !== method) return json({ error: 'method' }, 405, { ...cors, Allow: method });
 
   if (path === '/tiers/aggregate') return getAggregate(url, env, ctx, cors, keys);
   if (path === '/versus') return postVersus(request, env, ctx, cors, keys);
+  if (path === '/versus/tournament') return postTournament(request, env, ctx, cors, keys);
   return getRanking(url, env, ctx, cors, keys);
 }
 
@@ -97,6 +100,20 @@ export function validateVersus(body, keys, loggedIn = false) {
   return null;
 }
 
+// body: { category, champion, entrants: [아이템id...], voter? }. 틀리면 이유, 맞으면 null.
+// entrants 는 4·8·16·32·64개, 서로 다른 그 카테고리의 아이템. champion 은 그중 하나.
+export function validateTournament(body, keys, loggedIn = false) {
+  if (!body || typeof body !== 'object') return 'body';
+  const { category, champion, entrants, voter } = body;
+  if (typeof category !== 'string' || !categoriesOf(keys).has(category)) return 'category';
+  if (!Array.isArray(entrants) || !BRACKET_SIZES.includes(entrants.length)) return 'entrants';
+  if (!entrants.every(id => typeof id === 'string' && keys.has(`${category}/${id}`))) return 'item';
+  if (new Set(entrants).size !== entrants.length) return 'duplicate';
+  if (typeof champion !== 'string' || !entrants.includes(champion)) return 'champion';
+  if (!loggedIn && !isAnonVoter(voter)) return 'voter';
+  return null;
+}
+
 // 쌍은 a < b 로 정렬해 저장한다.
 export function normalizePair(x, y) {
   return x < y ? [x, y] : [y, x];
@@ -114,7 +131,8 @@ const round1 = r => Math.round(r * 10) / 10;
 
 // 같은 사람은 한 표: 동기화본이 있으면 그것, 없으면 숨김이 아닌 최신 글.
 // 읽는 행 수를 묶기 위해 동기화본은 최신 5000개, 글은 최신 10000개만 색인 순서로 가져온다
-// (user_tiers (template, updated_at) 색인은 0003, posts 는 0002 의 posts_template_new).
+// (user_tiers (template, updated_at) 색인은 0003, posts 는 0004 의 posts_kind_template_created).
+// 갤러리 글 중 티어표(kind = 'tier')만 센다 — 밸런스 투표 글 등은 state 모양이 다르다.
 // 점수 계산까지 SQL(json_each) 에서 끝내서 큰 state 를 Worker 로 옮기거나 파싱하지 않는다.
 // json_each/json_type 은 깨진 JSON 에서 오류를 낸다. WHERE 의 AND 는 SQLite 가 순서를 바꿔 평가하므로
 // (json_valid 보다 json_type 이 먼저 돌 수 있다) 반드시 CASE 로 순서를 강제한다.
@@ -124,7 +142,7 @@ WITH synced AS (
   ORDER BY updated_at DESC LIMIT ${AGGREGATE_MAX_LISTS}
 ),
 recent_posts AS (
-  SELECT user_id, state, created AS t FROM posts WHERE template = ?1 AND hidden = 0
+  SELECT user_id, state, created AS t FROM posts WHERE kind = 'tier' AND template = ?1 AND hidden = 0
   ORDER BY created DESC LIMIT ${AGGREGATE_MAX_LISTS * 2}
 ),
 posted AS (
@@ -233,19 +251,59 @@ async function postVersus(request, env, ctx, cors, keys) {
   return json({ ok: true, ratings }, 200, cors);
 }
 
+// ---- 월드컵(토너먼트) ----
+
+// 한 판이 끝나면 화면이 우승 항목과 출전 항목을 보낸다. 출전한 항목마다 entries + 1, 우승 항목은 champ + 1.
+// 경기마다의 선택은 따로 POST /versus 로 들어와 Elo 에 반영된다.
+// 매개변수 수 제한(문장당 100개)에 걸리지 않게 출전 목록은 JSON 배열 하나로 넘겨 json_each 로 푼다.
+// (INSERT … SELECT 에 ON CONFLICT 를 붙일 때는 구문 모호성 때문에 WHERE 가 있어야 한다.)
+const TOURNAMENT_SQL = `
+INSERT INTO worldcup_stats (category, item, champ, entries)
+SELECT ?1, value, CASE WHEN value = ?2 THEN 1 ELSE 0 END, 1 FROM json_each(?3) WHERE 1
+ON CONFLICT (category, item) DO UPDATE SET champ = champ + excluded.champ, entries = entries + 1`;
+
+async function postTournament(request, env, ctx, cors, keys) {
+  const body = await readJson(request);
+  if (body === undefined) return json({ error: 'bad_request', reason: 'json' }, 400, cors);
+  const user = await getUser(request, env);
+  const reason = validateTournament(body, keys, Boolean(user));
+  if (reason) return json({ error: 'bad_request', reason }, 400, cors);
+
+  const ipHash = await ipHashOf(request, env);
+  if (await rateLimited(env, ipHash, TOURNAMENT_RATE_PER_MINUTE, 'cup')) return json({ error: 'rate_limited' }, 429, cors);
+
+  const { category, champion, entrants } = body;
+  await env.DB.prepare(TOURNAMENT_SQL).bind(category, champion, JSON.stringify(entrants)).run();
+  return json({ ok: true }, 200, cors);
+}
+
+// 두 표를 합친다. 월드컵에만 나온 항목은 Elo 시작값으로.
+export function mergeRanking(ratings, cups, category, keys) {
+  const items = {};
+  const ok = item => keys.has(`${category}/${item}`);
+  for (const { item, rating, wins, losses } of ratings) {
+    if (ok(item)) items[item] = { rating: round1(rating), wins, losses, champ: 0, entries: 0 };
+  }
+  for (const { item, champ, entries } of cups) {
+    if (!ok(item)) continue;
+    const r = items[item] || (items[item] = { rating: ELO_START, wins: 0, losses: 0, champ: 0, entries: 0 });
+    r.champ = champ;
+    r.entries = entries;
+  }
+  return items;
+}
+
 async function getRanking(url, env, ctx, cors, keys) {
   const category = url.searchParams.get('category');
   if (!category || !categoriesOf(keys).has(category)) return json({ error: 'bad_request', reason: 'category' }, 400, cors);
 
-  return cached(`versus/ranking?category=${encodeURIComponent(category)}`, RANKING_TTL, ctx, cors, async () => {
-    const { results } = await env.DB.prepare(
-      'SELECT item, rating, wins, losses FROM versus_ratings WHERE category = ?1'
-    ).bind(category).all();
-    const items = {};
-    for (const { item, rating, wins, losses } of results) {
-      if (keys.has(`${category}/${item}`)) items[item] = { rating: round1(rating), wins, losses };
-    }
-    return { category, items };
+  // 캐시 열쇠에 v=2: 월드컵 수치가 없는 예전 응답을 다시 쓰지 않게
+  return cached(`versus/ranking?v=2&category=${encodeURIComponent(category)}`, RANKING_TTL, ctx, cors, async () => {
+    const [ratings, cups] = await env.DB.batch([
+      env.DB.prepare('SELECT item, rating, wins, losses FROM versus_ratings WHERE category = ?1').bind(category),
+      env.DB.prepare('SELECT item, champ, entries FROM worldcup_stats WHERE category = ?1').bind(category),
+    ]);
+    return { category, items: mergeRanking(ratings.results, cups.results, category, keys) };
   });
 }
 

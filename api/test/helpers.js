@@ -1,5 +1,5 @@
 // 테스트 도우미: 시험용 RSA 키로 구글 ID 토큰 흉내 내기, node:sqlite 로 만든 작은 D1 대역.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { bytesToB64url } from '../src/auth.js';
 
 const RS256 = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
@@ -26,8 +26,12 @@ export function googlePayload(clientId, extra = {}) {
   return { iss: 'https://accounts.google.com', aud: clientId, sub: '1000001', name: 'Test User', picture: 'https://example.com/a.png', iat: now, exp: now + 3600, ...extra };
 }
 
+// migrations 폴더의 모든 마이그레이션 (0001_… 순서대로)
+export const ALL_MIGRATIONS = readdirSync(new URL('../migrations/', import.meta.url)).filter(f => f.endsWith('.sql')).sort();
+
 // D1 의 prepare/bind/first/all/run/batch 만 흉내 낸다. node:sqlite 가 없으면 null.
-export async function makeD1(migrations) {
+// migrations 를 주지 않으면 모두 적용한다.
+export async function makeD1(migrations = ALL_MIGRATIONS) {
   let DatabaseSync;
   try { ({ DatabaseSync } = await import('node:sqlite')); } catch { return null; }
   const db = new DatabaseSync(':memory:');
