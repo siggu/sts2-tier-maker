@@ -12,13 +12,36 @@
   background: #2a2620;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, .12);
 }
-.acct-av-init {
-  display: inline-grid; place-items: center;
-  background: hsl(var(--hue, 30) 38% 32%);
-  color: #f6ecd6; font-size: 12px; font-weight: 800; line-height: 1;
+.acct-av.sm { width: 20px; height: 20px; }
+.acct-av.lg { width: 40px; height: 40px; }
+
+/* 프로필 사진 고르기 창 */
+.av-pick { display: grid; gap: 10px; }
+.av-pick-head { display: flex; align-items: center; gap: 14px; padding-bottom: 4px; }
+.av-pick-preview.acct-av { width: 72px; height: 72px; box-shadow: 0 0 0 2px var(--gold); }
+.av-pick-name { color: var(--gold-hi); font-size: 17px; }
+.av-pick-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; font-weight: 700; }
+.av-pick-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.av-pick-own { display: flex; align-items: center; gap: 10px; }
+.av-pick-own .av-pick-opt { width: 60px; flex: none; }
+.av-pick-opt {
+  position: relative; display: block; aspect-ratio: 1; padding: 0;
+  border: 0; border-radius: 50%; background: #2a2834; cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .14);
+  transition: box-shadow .12s, transform .12s;
 }
-.acct-av.sm { width: 20px; height: 20px; font-size: 10.5px; }
-.acct-av.lg { width: 40px; height: 40px; font-size: 17px; }
+.av-pick-opt img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.av-pick-opt:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px rgba(217, 164, 65, .55); }
+.av-pick-opt.on { box-shadow: 0 0 0 3px var(--gold), 0 0 14px rgba(217, 164, 65, .45); }
+.av-pick-opt:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 3px; }
+.av-pick-badge {
+  position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%);
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--panel-solid); border: 1px solid var(--line-strong);
+  color: var(--muted); font-size: 10.5px; line-height: 1.4; white-space: nowrap;
+}
+.av-pick-file { display: none; }
+.av-pick-status:empty { display: none; }
 
 /* ---------------------------------------------------------------- 상단: 로그인 / 프로필 */
 .acct-top { display: flex; align-items: center; }

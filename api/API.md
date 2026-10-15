@@ -39,7 +39,7 @@
 ```sql
 users(id TEXT PK,            -- 무작위 16바이트 hex
       google_sub TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL, picture TEXT, created INTEGER NOT NULL)
+      name TEXT NOT NULL, picture TEXT, created INTEGER NOT NULL)   -- picture 는 더 이상 쓰지 않음(로그인 때 NULL), avatar TEXT (0008)
 sessions(token_hash TEXT PK, user_id TEXT NOT NULL, created INTEGER, expires INTEGER)   -- 30일
 user_tiers(user_id, template, state TEXT, updated_at INTEGER, PRIMARY KEY(user_id, template))
 posts(id TEXT PK, user_id, template, title, state TEXT, created INTEGER,
@@ -66,11 +66,11 @@ reports(kind TEXT, target_id TEXT, user_id TEXT, reason TEXT, created INTEGER, P
 | `POST /auth/google` `{ credential, voter? }` | 구글 ID 토큰(JWT, Google Identity Services) 검증 → 사용자 만들기/찾기 → `{ token, user }`. `voter` 를 주면 그 익명 id 로 낸 밸런스 표를 이 계정으로 옮긴다(계정에 이미 있는 항목은 계정 표 유지). |
 | `POST /auth/logout` | 세션 삭제. `{ ok: true }` |
 | `GET /me` | `{ user, votes: { '카테고리/id': 'nerf'|'fair'|'buff' }, tiers: { 템플릿id: { state, updatedAt } } }` |
-| `PATCH /me` `{ name }` | 표시 이름 바꾸기 (2–20자, 앞뒤 공백 제거). `{ user }` |
+| `PATCH /me` `{ name?, avatar? }` | 보낸 것만 바꾼다. `name`: 표시 이름 (2–20자, 앞뒤 공백 제거). `avatar`: `'face:<ironclad\|silent\|regent\|necrobinder\|defect>'` \| `'img:<id>'`(내가 `POST /images` 로 올린 이미지만) \| `null`(기본 얼굴). 틀리면 400 `reason: 'avatar'`. 사용자당 1분 10번. `{ user }` |
 | `PUT /me/tiers/:template` `{ state }` | 티어표 저장(덮어쓰기). 서버 시각을 `updatedAt` 으로. `{ ok, updatedAt }` |
 | `DELETE /me/tiers/:template` | 삭제 |
 
-`user` = `{ id, name, picture, admin: bool }`.
+`user` = `{ id, name, avatar, admin: bool }`. `avatar` 는 항상 값이 있다: 고르지 않았으면 id 로 정한 얼굴 `'face:…'` (auth.js `avatarOf`). 얼굴 그림은 사이트의 `img/avatars/<캐릭터>.webp`, 올린 사진은 `/img/<id>`. 구글 사진은 내보내지 않는다.
 JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/v3/certs`, 캐시) 로 서명 확인,
 `iss` ∈ {`accounts.google.com`, `https://accounts.google.com`}, `aud` = `GOOGLE_CLIENT_ID`, `exp` 가 지나지 않음.
 
@@ -88,7 +88,7 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 | `DELETE /gallery/:id` 🔒 | 작성자나 관리자 |
 | `POST /gallery/:id/react` `{ v: 1 | -1 | 0 }` 🔒 | 0 은 취소. `{ likes, dislikes, myReaction }` |
 
-`post` = `{ id, kind: 'tier'|'balance', template, title, state, author: { id, name, picture }, created, likes, dislikes, comments, myReaction: 1|-1|0 }`
+`post` = `{ id, kind: 'tier'|'balance', template, title, state, author: { id, name, avatar }, created, likes, dislikes, comments, myReaction: 1|-1|0 }`
 (덧붙임: `hidden: bool` — 숨겨진 글은 작성자·관리자에게만 오며 그때 `true`. `next` 는 다음 쪽 `cursor` 로 그대로 넘기는 문자열, 끝이면 `null`.)
 (목록에서도 `state` 를 포함한다 — 미리보기 썸네일용.)
 
@@ -114,7 +114,7 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 | `POST /comments/:id/like` `{ on: bool }` 🔒 | `{ likes, myLike }` |
 | `POST /report` `{ kind: 'post'|'comment'|'cup', id, reason? }` 🔒 | `{ ok }` (`cup` 은 사용자 월드컵) |
 
-`comment` = `{ id, body, author: { id, name, picture }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
+`comment` = `{ id, body, author: { id, name, avatar }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
 (덧붙임: `hidden: bool`. 지운 댓글은 목록에 나오지 않는다. 본문은 원문 그대로 저장·반환하므로 화면에서 이스케이프한다.)
 — `vote` 는 항목 댓글에서 작성자가 그 항목에 낸 밸런스 표(없으면 null). 본문 1–500자, 1분에 5개까지.
 
@@ -184,7 +184,7 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 | `GET /cups/:id/comments` | `{ comments: [comment] }` (오래된 순, 최대 200) — 갤러리 글 댓글과 같은 모양 |
 | `POST /cups/:id/comments` 🔒 `{ body }` | `{ comment }`. 본문 1–500자, 1분에 5개(모든 댓글 합산). 댓글 좋아요·삭제·신고는 기존 `/comments/:id/like`, `DELETE /comments/:id`, `POST /report { kind: 'comment' }`. |
 
-`cup` = `{ id, title, description, cover, itemCount, plays, likes, comments, author: { id, name, picture }, created, sample, myLike: bool, hidden: bool, mine: bool }`
+`cup` = `{ id, title, description, cover, itemCount, plays, likes, comments, author: { id, name, avatar }, created, sample, myLike: bool, hidden: bool, mine: bool }`
 - `sample` = 항목 이미지 참조 4개 (이미지 있는 항목 먼저, 항목 순서대로; 모자라면 `null` 로 채운다).
 - `comments` = 지워지지도 숨겨지지도 않은 댓글 수 (댓글 쓰기·지우기·신고 숨김 때 다시 센다).
 - `next` 는 다음 쪽 `cursor` 로 그대로 넘기는 문자열, 끝이면 `null`.

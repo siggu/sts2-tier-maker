@@ -5,6 +5,7 @@ import {
   validatePlay, playError, tallyMatches, imageTypeOf, IMAGE_TYPES, imageId, MAX_IMAGE_BYTES,
 } from '../src/cups.js';
 import { handleAccount } from '../src/account.js';
+import { avatarOf } from '../src/auth.js';
 import { corsHeaders } from '../src/http.js';
 import { makeTestKey, googlePayload, makeD1, playBracket } from './helpers.js';
 
@@ -275,7 +276,7 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   assert.match(cup.id, /^[0-9a-f]{24}$/);
   assert.deepEqual({ ...cup, id: 0, created: 0 }, {
     id: 0, title: '최애 월드컵', description: '설명\n둘째 줄', cover: jpegRef, itemCount: 8, plays: 0, likes: 0, comments: 0,
-    author: { id: alice.user.id, name: 'Alice', picture: 'https://example.com/a.png' }, created: 0,
+    author: { id: alice.user.id, name: 'Alice', avatar: avatarOf(null, alice.user.id) }, created: 0,
     sample: [`img:${pngId}`, 'game:cards/bash', webpRef, 'game:relics/anchor'], myLike: false, hidden: false, mine: true,
   });
 
@@ -379,7 +380,7 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   assert.equal((await call('POST', `/cups/${cup.id}/comments`, { token: B, body: { body: ' ' } })).data.reason, 'body');
   const c1 = (await call('POST', `/cups/${cup.id}/comments`, { token: B, body: { body: '재밌다' } })).data.comment;
   assert.deepEqual({ ...c1, id: 0, created: 0 }, {
-    id: 0, body: '재밌다', author: { id: bob.user.id, name: 'Bob', picture: 'https://example.com/a.png' }, created: 0,
+    id: 0, body: '재밌다', author: { id: bob.user.id, name: 'Bob', avatar: avatarOf(null, bob.user.id) }, created: 0,
     likes: 0, myLike: false, mine: true, vote: null, hidden: false,
   });
   const c2 = (await call('POST', `/cups/${cup.id}/comments`, { token: A, body: { body: '고마워요' } })).data.comment;

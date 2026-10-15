@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { verifyGoogleIdToken, makeKeyResolver, keyResolverFor, getUser } from '../src/auth.js';
+import { verifyGoogleIdToken, makeKeyResolver, keyResolverFor, getUser, avatarOf, FACES } from '../src/auth.js';
 import { handleAccount, isTemplateId, cleanName, cleanComment, cleanTitle, normalizeState, normalizeBalanceState } from '../src/account.js';
 import { makeValidator, isAnonVoter } from '../src/votes.js';
 import { corsHeaders } from '../src/http.js';
@@ -153,7 +153,7 @@ test('익명 voter: u_ 로 시작하면 받지 않고, 로그인 상태면 voter
 
 // ---------- 경로 전체 (node:sqlite 로 만든 D1 대역) ----------
 
-const DB = await makeD1(['0001_init.sql', '0002_accounts.sql', '0003_play.sql', '0004_gallery_kind_worldcup.sql']);
+const DB = await makeD1();
 
 test('계정·갤러리·댓글 흐름', { skip: !DB && 'node:sqlite 없음' }, async () => {
   const env = { DB, GOOGLE_CLIENT_ID: CLIENT_ID, ADMIN_SUBS: 'admin-sub, other', TEST_JWKS: JSON.stringify(key.jwks), ALLOWED_ORIGINS: 'http://localhost:8000' };
@@ -214,6 +214,30 @@ test('계정·갤러리·댓글 흐름', { skip: !DB && 'node:sqlite 없음' }, 
   assert.deepEqual((await call('PATCH', '/me', { token: A, body: { name: 'a' } })).data, { error: 'bad_request', reason: 'name' });
   r = await call('PATCH', '/me', { token: A, body: { name: ' 앨리스 ' } });
   assert.equal(r.data.user.name, '앨리스');
+
+  // 프로필 사진: 기본은 id 로 정한 얼굴, 얼굴 5종 또는 내가 올린 이미지만
+  const aId = r.data.user.id;
+  assert.equal(r.data.user.avatar, avatarOf(null, aId));
+  assert.equal(r.data.user.picture, undefined);
+  assert.ok(FACES.includes(avatarOf(null, aId).slice(5)));
+  assert.equal(avatarOf(null, aId), avatarOf(null, aId));
+  assert.ok(new Set(Array.from({ length: 40 }, (_, i) => avatarOf(null, `u${i}`))).size === 5);
+  for (const avatar of ['face:watcher', 'img:xyz', 'https://evil.example/a.png', 3, `img:${'a'.repeat(32)}`]) {
+    assert.deepEqual((await call('PATCH', '/me', { token: A, body: { avatar } })).data, { error: 'bad_request', reason: 'avatar' }, String(avatar));
+  }
+  r = await call('PATCH', '/me', { token: A, body: { avatar: 'face:regent' } });
+  assert.equal(r.data.user.avatar, 'face:regent');
+  assert.equal(r.data.user.name, '앨리스');
+  r = await call('GET', '/me', { token: A });
+  assert.equal(r.data.user?.avatar, 'face:regent', JSON.stringify(r));
+  DB.raw.exec('DELETE FROM rate_limit'); // 분당 프로필 변경 한도
+  DB.raw.prepare("INSERT INTO images (id, user_id, type, bytes, size, created) VALUES (?, ?, 'image/webp', x'00', 1, 0)").run('b'.repeat(32), aId);
+  DB.raw.prepare("INSERT INTO images (id, user_id, type, bytes, size, created) VALUES (?, ?, 'image/webp', x'00', 1, 0)").run('c'.repeat(32), 'someone-else');
+  assert.equal((await call('PATCH', '/me', { token: A, body: { avatar: `img:${'c'.repeat(32)}` } })).data.reason, 'avatar');
+  r = await call('PATCH', '/me', { token: A, body: { avatar: `img:${'b'.repeat(32)}` } });
+  assert.equal(r.data.user.avatar, `img:${'b'.repeat(32)}`);
+  r = await call('PATCH', '/me', { token: A, body: { avatar: null } });
+  assert.equal(r.data.user.avatar, avatarOf(null, aId));
 
   // 티어표 동기화
   const state = { title: '내 티어', tiers: [{ label: 'S', color: '#e5484d', items: ['bash'] }, { label: 'A', color: '#f2884b', items: [] }], updatedAt: 5 };

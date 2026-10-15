@@ -9,6 +9,7 @@ import { openDetail } from './detail.js';
 import { verdictsFor, loadMine, saveMine, loadSubmitted, unsubmittedChanges, fetchResults } from './balance.js';
 import { loadState, saveState, savedSummary, sanitize, setStorageHooks } from './tierlist.js';
 import { renderPng } from './export.js';
+import { avatar, avatarDialog } from './avatar.js';
 import {
   currentUser, onAuthChange, requireLogin, loginEnabled, api, errorText,
   openModal, openLogin, preloadLogin, logout, fetchMe, updateUser,
@@ -41,6 +42,7 @@ const ICONS = {
   edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
   grid: 'M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z',
   caret: 'M7 10l5 5 5-5z',
+  face: 'M9 11.75a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zm6 0a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21.71.33 1.47.33 2.26 0 4.41-3.59 8-8 8z',
 };
 export function icon(name) {
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -73,19 +75,8 @@ export function timeEl(ts) {
 }
 
 // 프로필 사진(구글) — 없거나 깨지면 이름 첫 글자
-export function avatar(user, cls = '') {
-  const name = String(user?.name || '?').trim();
-  const initial = ([...name][0] || '?').toUpperCase();
-  let hue = 0;
-  for (const ch of String(user?.id || name)) hue = (hue * 31 + ch.charCodeAt(0)) % 3600;
-  hue = (hue * 137) % 360; // 비슷한 id 도 색이 멀리 떨어지게
-  const fallback = h('span', { class: `acct-av acct-av-init ${cls}`, style: { '--hue': String(hue) }, 'aria-hidden': 'true' }, initial);
-  const pic = typeof user?.picture === 'string' && /^https:\/\//.test(user.picture) ? user.picture : null;
-  if (!pic) return fallback;
-  const img = h('img', { class: `acct-av ${cls}`, src: pic, alt: '', referrerpolicy: 'no-referrer', loading: 'lazy', decoding: 'async' });
-  img.addEventListener('error', () => img.replaceWith(fallback), { once: true });
-  return img;
-}
+// 프로필 사진은 avatar.js (캐릭터 얼굴 또는 올린 사진)
+export { avatar };
 
 const isMine = author => Boolean(currentUser() && author && author.id === currentUser().id);
 const canDelete = author => isMine(author) || Boolean(currentUser()?.admin);
@@ -328,6 +319,7 @@ function openMenu(anchor) {
         h('span', {}, user.admin ? t('acct.admin') : t('acct.signedIn'))),
     ),
     item('grid', t('acct.myGallery'), () => { location.hash = galleryHref(null, { author: user.id }); }),
+    item('face', t('acct.avatar'), () => avatarDialog(ctxRef.db)),
     item('edit', t('acct.rename'), renameDialog),
     item('logout', t('acct.logout'), () => logout(), 'danger'),
   );

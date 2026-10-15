@@ -1,7 +1,7 @@
 // 사용자 월드컵(이상형 월드컵 만들기·하기)과 올린 이미지.
 // 처리하는 경로면 Response, 아니면 null 을 돌려준다.
 import { json, ipHashOf, rateLimited, readJson } from './http.js';
-import { getUser, randomHex } from './auth.js';
+import { getUser, randomHex, avatarOf } from './auth.js';
 import { isAnonVoter } from './votes.js';
 import { checkBracket, bracketStats } from './bracket.js';
 import { UNSAFE_CHARS, listComments, addComment } from './account.js';
@@ -287,7 +287,7 @@ const refMissing = (ref, missing) => typeof ref === 'string' && ref.startsWith('
 
 // ?1 = 보는 사람 id (없으면 '')
 const CUP_COLUMNS = `k.id, k.user_id, k.title, k.description, k.cover, k.item_count, k.sample, k.plays, k.likes, k.comments,
-  k.hidden, k.created, u.name AS a_name, u.picture AS a_picture,
+  k.hidden, k.created, u.name AS a_name, u.avatar AS a_avatar,
   EXISTS (SELECT 1 FROM cup_likes l WHERE l.cup_id = k.id AND l.user_id = ?1) AS my_like`;
 
 function parseJson(text, fallback) {
@@ -304,7 +304,7 @@ function cupOut(r, user) {
     plays: r.plays,
     likes: r.likes,
     comments: r.comments,
-    author: { id: r.user_id, name: r.a_name, picture: r.a_picture || null },
+    author: { id: r.user_id, name: r.a_name, avatar: avatarOf(r.a_avatar, r.user_id) },
     created: r.created,
     sample: parseJson(r.sample, []),
     myLike: Boolean(r.my_like),
@@ -361,7 +361,7 @@ async function createCup(c) {
     cup: cupOut({
       id, user_id: user.id, title: cup.title, description: cup.description, cover: cup.cover, item_count: cup.items.length,
       sample: JSON.stringify(sample), plays: 0, likes: 0, comments: 0, hidden: 0, created: now,
-      a_name: user.name, a_picture: user.picture, my_like: 0,
+      a_name: user.name, a_avatar: user.avatar, my_like: 0,
     }, user),
   });
 }
