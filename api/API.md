@@ -179,7 +179,7 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 
 | 요청 | 설명 |
 |---|---|
-| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. 가로·세로 16–1024px, 움직이는 그림(APNG·애니메이션 WebP) 금지. 메타데이터를 지운 뒤 id = sha256(정리한 파일) 앞 32자리 hex — 같은 그림은 같은 id(오류 아님). 그다음 **이미지 검열**(아래). IP 당 1분 20개, 한 사람이 하루에 새 이미지 300개. `{ id, ref: 'img:<id>', status: 'ok'|'pending' }` |
+| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. 가로·세로 16–1024px, 움직이는 그림(APNG·애니메이션 WebP) 금지. 메타데이터를 지운 뒤 id = sha256(정리한 파일) 앞 32자리 hex — 같은 그림은 같은 id(오류 아님). 그다음 **이미지 검열**(아래). IP 당 1분 20개, 한 사람이 하루에 새 이미지 300개, 사이트 전체 한도(아래 **사이트 전체 한도**). `?purpose=avatar` 면 프로필 사진용(관리자 화면 구분). `{ id, ref: 'img:<id>', status: 'ok'|'pending' }` |
 | `GET /img/:id` | 이미지 바이트 (`status` 가 `ok`·`pending` 인 것만, 숨김·차단·없으면 404). `Content-Type` 은 올릴 때 형식, `Cache-Control: public, max-age=86400`, `Access-Control-Allow-Origin: *`(canvas 에 그릴 수 있게), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cross-Origin-Resource-Policy: cross-origin`. 엣지 캐시(Cache API, 열쇠 = 요청 주소)에는 1시간 둔다. |
 | `POST /cups` 🔒 `{ title, description?, cover?, items: [{ name, img? }] }` | 만들기 → `{ cup }`. 제목 2–60자(한 줄), 설명 0–300자(줄바꿈 가능), 항목 4–64개, 항목 이름 1–80자(한 줄). `cover`·`img` 는 빼면 `null`. 항목 id 는 서버가 순서대로 `'i1'…'iN'`. 사용자당 1분 3개, 하루 10개(`reason: 'daily'`). |
 | `GET /cups?sort=new|top&cursor=&author=` | `{ cups: [cup], next }` (20개씩). `sort` 기본 `new`. `top` = 좋아요 → 판 수 → 최신 순. `author` 는 users.id. 숨겨진 월드컵은 작성자·관리자에게만. |
@@ -227,7 +227,7 @@ image_blocklist(hash TEXT PK, created INTEGER, reason TEXT)                     
 ## 이미지 검열 (image.js, moderation.js, admin.js)
 
 올린 이미지는 저장 전에 이렇게 거른다 (`storeModeratedImage(env, bytes, { userId, purpose, type?, dailyLimit? })` —
-나중에 프로필 사진도 같은 함수를 쓴다):
+프로필 사진도 같은 함수를 쓴다):
 
 1. **검사·정리** (image.js `inspectImage`): 매직 바이트, 가로·세로 16–1024px, 움직이는 그림 금지(PNG `acTL`, WebP `ANIM`·`ANMF`·VP8X 애니메이션 플래그).
    메타데이터를 지운다 — PNG: 그리는 데 필요한 조각(IHDR·PLTE·IDAT·IEND·tRNS·색 공간·pHYs 등)만 남기고 `tEXt`·`zTXt`·`iTXt`·`eXIf`·`tIME`·모르는 부가 조각을 버림.
@@ -241,7 +241,9 @@ image_blocklist(hash TEXT PK, created INTEGER, reason TEXT)                     
    - `UNSAFE` → 400 `{ error: 'blocked' }`, 해시를 `image_blocklist` 에 넣는다(바이트는 저장하지 않음).
    - `SAFE` → `status = 'ok'`.
    - AI 없음·모두 오류·시간 초과 → `status = 'pending'` (보이지만 관리자 검토 목록에 뜬다).
-   `images.ai` 에 판정을 짧게 남긴다 (예: `llama-3.2-11b-vision-instruct: SAFE`, `no-ai`, `timeout / …`).
+   `images.ai` 에 판정을 짧게 남긴다 (예: `llama-3.2-11b-vision-instruct: SAFE`, `no-ai`, `timeout / …`, `ai-daily-limit`).
+
+**사이트 전체 한도** (0009 `usage_counters`, 바꾸려면 `[vars]`): 저장한 이미지 합이 `IMAGE_STORAGE_MB`(기본 350MB — 무료 D1 은 DB 하나에 500MB)를 넘으면 507 `{ error: 'storage_full' }`. 하루(UTC) 새 이미지 `IMAGES_PER_DAY_SITE`(기본 1500)개를 넘으면 429 `{ error: 'rate_limited', reason: 'site_daily' }` (AI 를 부르기 전에 막는다). 하루 AI 호출 `AI_DAILY_LIMIT`(기본 500)번을 넘으면 AI 없이 `pending` (`ai-daily-limit`). 같은 그림(이미 있는 id)은 세지 않는다.
 
 **신고**: `POST /report { kind: 'image', id }` — 한 사람이 한 번, 서로 다른 3명이면 `status = 'hidden'` (`/img` 404, 엣지 캐시에서 지움). `images.reports` = 신고 수.
 사이트는 사용자 월드컵 순위 화면에서 올린 이미지 옆의 '이미지 신고' 로 보낸다.
@@ -271,11 +273,13 @@ image_blocklist(hash TEXT PK, created INTEGER, reason TEXT)                     
 | 404 | `not_found` | 없는 글·댓글·항목, 숨겨진 글(작성자·관리자 아님) |
 | 405 | `method_not_allowed` | 경로는 있으나 메서드가 다름 |
 | 413 | `too_large` | 요청 본문 32KB(티어표·글) / 8KB(그 밖) 초과, 티어표 state 24KB 초과 |
-| 429 | `rate_limited` | 1분당: 로그인 10(IP), 이름 10, 티어표 저장 60, 글 5, 반응 60, 댓글 5, 댓글 좋아요 60, 신고 10(사용자). 글은 하루 20개(`reason: 'daily'`) |
+| 429 | `rate_limited` | 맨 앞: IP 당 1분 API 120번·`/img/` 600번 (Cloudflare 요청 제한 바인딩 `API_LIMITER`·`IMG_LIMITER`, D1 을 쓰지 않음, `Retry-After: 60`). 그 뒤 기능별 1분당: 로그인 10(IP), 이름 10, 티어표 저장 60, 글 5, 반응 60, 댓글 5, 댓글 좋아요 60, 신고 10(사용자). 글은 하루 20개(`reason: 'daily'`) |
 | 503 | `login_disabled` | `GOOGLE_CLIENT_ID` 가 비어 있음 |
+| 507 | `storage_full` | 사이트 전체 이미지 저장 용량 한도 (`POST /images`) |
 
 - 세션 토큰은 43자 base64url, 30일 뒤 만료(연장 없음). 로그아웃은 언제나 `{ ok: true }`.
-- 처음 로그인하면 이름은 구글 이름 앞 20자(2자 미만이면 `player-xxxx`). 다시 로그인하면 사진만 갱신한다.
+- 처음 로그인하면 이름은 구글 이름 앞 20자(2자 미만이면 `player-xxxx`). 구글 사진은 저장하지 않는다(예전에 저장한 것은 다음 로그인 때 지운다).
+- IP 는 `IP_SALT` 시크릿과 섞은 해시로만 저장한다. 배포 워크플로가 없으면 무작위 값으로 한 번 만든다.
 - 사용자 표시 이름·제목·댓글에서 제어 문자와 글자 방향 바꾸기 문자는 지운다. 그 밖의 문자(`<` 등)는 그대로 저장한다.
 - 로컬 시험: `TEST_JWKS`(JWKS JSON 문자열) 변수가 있고 요청 주소가 `localhost`/`127.0.0.1` 일 때만 구글 JWKS 대신 그 키로 ID 토큰을 검증한다
   (`RUN_E2E=1 node --test test/e2e.test.js` 가 이렇게 띄운다). 배포 주소에서는 설정돼 있어도 쓰지 않는다.

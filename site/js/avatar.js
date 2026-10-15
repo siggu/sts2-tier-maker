@@ -5,11 +5,13 @@ import { t } from './i18n.js';
 import { h, toast } from './ui.js';
 import { API_BASE } from './balance.js';
 import { currentUser, api, authHeaders, dropSession, errorText, openModal, updateUser } from './auth.js';
+import { checkImageSafe, preloadImageCheck } from './nsfw.js';
 
 export const FACES = ['ironclad', 'silent', 'regent', 'necrobinder', 'defect'];
 const IMG_REF = /^img:[0-9a-f]{32}$/;
 const SIZE = 256;           // 올리는 사진 한 변(px)
 const MAX_BYTES = 300 * 1024; // 서버 한도
+const MIN_PX = 16;            // 서버가 받는 가장 짧은 변
 
 const isFace = v => typeof v === 'string' && v.startsWith('face:') && FACES.includes(v.slice(5));
 
@@ -61,6 +63,16 @@ export function avatarDialog(db) {
     onchange: () => { const file = input.files?.[0]; input.value = ''; if (file) upload(file); },
   });
   const uploadBtn = h('button', { class: 'btn small', type: 'button', onclick: () => { if (!busy) input.click(); } }, t('acct.avatarUpload'));
+  // 클립보드의 그림: 창이 열려 있는 동안 Ctrl+V(⌘V), 또는 붙여넣기 단추(navigator.clipboard.read 가 되는 브라우저만)
+  const pasteBtn = navigator.clipboard?.read ? h('button', { class: 'btn small', type: 'button', onclick: pasteFromButton }, t('acct.avatarPaste')) : null;
+  const onPaste = e => {
+    const file = [...(e.clipboardData?.files || [])].find(f => /^image\//.test(f.type));
+    if (!file || busy) return;
+    e.preventDefault();
+    upload(file);
+  };
+  document.addEventListener('paste', onPaste);
+  preloadImageCheck();
 
   const option = (ref, label) => h('button', {
     class: `av-pick-opt${ref === selected ? ' on' : ''}`, type: 'button', role: 'radio',
@@ -77,8 +89,30 @@ export function avatarDialog(db) {
       if (ref === defaultFace(user.id)) btn.append(h('span', { class: 'av-pick-badge' }, t('acct.avatarDefault')));
       return btn;
     }));
-    ownBox.replaceChildren(...[own && option(own, t('acct.avatarOwn')), uploadBtn, input].filter(Boolean));
+    ownBox.replaceChildren(...[own && option(own, t('acct.avatarOwn')), uploadBtn, pasteBtn, input].filter(Boolean));
     save.disabled = busy || selected === current;
+    if (pasteBtn) pasteBtn.disabled = busy;
+  }
+
+  async function pasteFromButton() {
+    if (busy) return;
+    let file = null;
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find(x => x.startsWith('image/'));
+        if (type) { const blob = await item.getType(type); file = new File([blob], 'clipboard', { type }); break; }
+      }
+    } catch {
+      status.classList.add('error');
+      status.textContent = t('acct.avatarPasteDenied');
+      return;
+    }
+    if (!file) {
+      status.classList.add('error');
+      status.textContent = t('acct.avatarPasteEmpty');
+      return;
+    }
+    upload(file);
   }
 
   async function upload(file) {
@@ -89,6 +123,8 @@ export function avatarDialog(db) {
     draw();
     try {
       const blob = await squareImage(file);
+      // 브라우저 검사(야한 그림이면 올리지 않음). 서버도 다시 검사한다.
+      if (!(await checkImageSafe(blob)).ok) throw Object.assign(new Error('nsfw'), { code: 'img_nsfw' });
       own = await uploadBlob(blob, p => { status.textContent = t('acct.avatarUploading', { p: Math.round(p * 100) }); });
       selected = own;
       status.textContent = '';
@@ -131,7 +167,7 @@ export function avatarDialog(db) {
       h('button', { class: 'btn ghost', type: 'button', onclick: () => m.close() }, t('acct.cancel')),
       save),
   );
-  const m = openModal({ title: t('acct.avatarTitle'), body, className: 'acct-small av-pick-modal', onClose: () => { m.closed = true; } });
+  const m = openModal({ title: t('acct.avatarTitle'), body, className: 'acct-small av-pick-modal', onClose: () => { m.closed = true; document.removeEventListener('paste', onPaste); } });
   draw();
   faces.querySelector('[aria-checked="true"]')?.focus();
 }
@@ -167,6 +203,7 @@ async function squareImage(file) {
   const W = src.width || src.naturalWidth, H = src.height || src.naturalHeight;
   if (!W || !H) throw Object.assign(new Error('decode'), { code: 'img_decode' });
   const side = Math.min(W, H);
+  if (side < MIN_PX) { src.close?.(); throw Object.assign(new Error('dimensions'), { code: 'img_dimensions' }); }
   const out = Math.min(SIZE, side);
   const c = document.createElement('canvas');
   c.width = c.height = out;
@@ -188,7 +225,7 @@ async function squareImage(file) {
 function uploadBlob(blob, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE}/images`);
+    xhr.open('POST', `${API_BASE}/images?purpose=avatar`);
     for (const [k, v] of Object.entries(authHeaders())) xhr.setRequestHeader(k, v);
     xhr.setRequestHeader('Content-Type', blob.type);
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
@@ -206,6 +243,9 @@ function uploadBlob(blob, onProgress) {
 
 function uploadErrorText(err) {
   if (err?.code === 'img_type' || err?.code === 'img_decode') return t('cups.img.unreadable');
+  if (err?.code === 'img_nsfw') return t('cups.img.nsfw');
+  if (err?.code === 'img_dimensions' || (err?.status === 400 && err.reason === 'dimensions')) return t('cups.img.dimensions');
+  if (err?.status === 400 && err.reason === 'animated') return t('cups.img.animated');
   if (err?.status === 413 || err?.code === 'too_big') return t('cups.img.tooBig');
   if (err?.status === 415 || (err?.status === 400 && (err.reason === 'type' || err.reason === 'image'))) return t('cups.img.unreadable');
   if (err?.status === 429 && err.reason === 'daily') return t('cups.img.daily');

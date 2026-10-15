@@ -260,7 +260,7 @@ async function patchMe(c) {
     const avatar = body.avatar;
     if (avatar !== null && !isFace(avatar)) {
       if (typeof avatar !== 'string' || !IMG_AVATAR.test(avatar)) return bad(c, 'avatar');
-      const own = await c.env.DB.prepare('SELECT 1 FROM images WHERE id = ?1 AND user_id = ?2').bind(avatar.slice(4), user.id).first();
+      const own = await c.env.DB.prepare(`SELECT 1 FROM images WHERE id = ?1 AND user_id = ?2 AND status IN ('ok', 'pending')`).bind(avatar.slice(4), user.id).first();
       if (!own) return bad(c, 'avatar');
     }
     user.avatar = avatarOf(avatar, user.id);

@@ -158,6 +158,45 @@ test('검열하며 저장하기', { skip: !DB0 && 'node:sqlite 없음' }, async 
   assert.equal((await storeModeratedImage({ DB, AI: ai }, jpeg(), { userId: 'u1', dailyLimit: 4 })).status, 'ok');
 });
 
+test('사이트 전체 한도: 저장 용량·하루 새 이미지·하루 AI 호출', { skip: !DB0 && 'node:sqlite 없음' }, async () => {
+  const DB = await makeD1();
+  const counter = key => DB.raw.prepare('SELECT n FROM usage_counters WHERE key = ?').get(key)?.n ?? 0;
+  const now = Date.UTC(2026, 9, 15, 12);
+  const day = '2026-10-15';
+  let ai = mockAI({ [LLAMA]: 'SAFE' });
+
+  // 저장하면 용량·하루 수가 늘고, AI 를 부른 수도 센다
+  let r = await storeModeratedImage({ DB, AI: ai }, png({ seed: 1 }), { userId: 'u1', now });
+  assert.equal(r.status, 'ok');
+  const size = DB.raw.prepare('SELECT size FROM images WHERE id = ?').get(r.id).size;
+  assert.deepEqual([counter('img_bytes'), counter(`img_day:${day}`), counter(`ai_day:${day}`)], [size, 1, 1]);
+  // 같은 그림은 세지 않는다
+  await storeModeratedImage({ DB, AI: ai }, png({ seed: 1 }), { userId: 'u2', now });
+  assert.deepEqual([counter('img_bytes'), counter(`img_day:${day}`), counter(`ai_day:${day}`)], [size, 1, 1]);
+
+  // AI 하루 한도를 넘으면 AI 없이 pending
+  r = await storeModeratedImage({ DB, AI: ai, AI_DAILY_LIMIT: '1' }, png({ seed: 2 }), { userId: 'u1', now });
+  assert.deepEqual([r.status, ai.calls.length], ['pending', 1]);
+  assert.equal(DB.raw.prepare('SELECT ai FROM images WHERE id = ?').get(r.id).ai, 'ai-daily-limit');
+
+  // 사이트 하루 새 이미지 한도
+  r = await storeModeratedImage({ DB, AI: ai, IMAGES_PER_DAY_SITE: '2' }, png({ seed: 3 }), { userId: 'u3', now });
+  assert.deepEqual(r, { error: 'rate_limited', reason: 'site_daily' });
+  assert.equal(ai.calls.length, 1); // AI 를 부르기 전에 막는다
+  // 다음 날은 다시 되고, 지난 날짜 칸은 지운다
+  const next = now + 86400000;
+  r = await storeModeratedImage({ DB, AI: ai, IMAGES_PER_DAY_SITE: '2' }, png({ seed: 3 }), { userId: 'u3', now: next });
+  assert.equal(r.status, 'ok');
+  assert.equal(counter(`img_day:${day}`), 0);
+  assert.equal(counter(`ai_day:${day}`), 0);
+  assert.equal(counter('img_day:2026-10-16'), 1);
+
+  // 저장 용량 한도
+  DB.raw.prepare(`UPDATE usage_counters SET n = ? WHERE key = 'img_bytes'`).run(350 * 1024 * 1024 - 10);
+  assert.deepEqual(await storeModeratedImage({ DB, AI: ai }, png({ seed: 4 }), { userId: 'u1', now: next }), { error: 'storage_full' });
+  assert.equal((await storeModeratedImage({ DB, AI: ai, IMAGE_STORAGE_MB: '400' }, png({ seed: 4 }), { userId: 'u1', now: next })).status, 'ok');
+});
+
 test('isAdmin: ADMIN_SUBS 또는 ADMIN_USERS', () => {
   const env = { ADMIN_SUBS: 'sub-a, sub-b', ADMIN_USERS: ' f00d , beef' };
   assert.equal(isAdmin(env, 'sub-b'), true);

@@ -234,6 +234,8 @@ test('계정·갤러리·댓글 흐름', { skip: !DB && 'node:sqlite 없음' }, 
   DB.raw.prepare("INSERT INTO images (id, user_id, type, bytes, size, created) VALUES (?, ?, 'image/webp', x'00', 1, 0)").run('b'.repeat(32), aId);
   DB.raw.prepare("INSERT INTO images (id, user_id, type, bytes, size, created) VALUES (?, ?, 'image/webp', x'00', 1, 0)").run('c'.repeat(32), 'someone-else');
   assert.equal((await call('PATCH', '/me', { token: A, body: { avatar: `img:${'c'.repeat(32)}` } })).data.reason, 'avatar');
+  DB.raw.prepare("INSERT INTO images (id, user_id, type, bytes, size, created, status) VALUES (?, ?, 'image/webp', x'00', 1, 0, 'hidden')").run('d'.repeat(32), aId);
+  assert.equal((await call('PATCH', '/me', { token: A, body: { avatar: `img:${'d'.repeat(32)}` } })).data.reason, 'avatar');
   r = await call('PATCH', '/me', { token: A, body: { avatar: `img:${'b'.repeat(32)}` } });
   assert.equal(r.data.user.avatar, `img:${'b'.repeat(32)}`);
   r = await call('PATCH', '/me', { token: A, body: { avatar: null } });

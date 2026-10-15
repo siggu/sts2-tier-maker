@@ -7,6 +7,14 @@ export const REPORTS_TO_HIDE_IMAGE = 3;
 export const IMAGE_STATUSES = ['ok', 'pending', 'hidden', 'blocked'];
 // /img/:id 로 보내는 상태 (pending 은 보이되 관리자 검토 목록에 뜬다)
 export const VISIBLE_STATUSES = ['ok', 'pending'];
+// 사이트 전체 한도 (env 로 바꿀 수 있다). 무료 D1 은 데이터베이스 하나에 500MB, Workers AI 는 하루 무료 사용량이 있다.
+export const SITE_LIMITS = { storageMb: 350, imagesPerDay: 1500, aiPerDay: 500 };
+const siteLimit = (env, name, envKey) => {
+  const v = Number(env[envKey]);
+  return Number.isFinite(v) && v > 0 ? v : SITE_LIMITS[name];
+};
+const dayKey = now => new Date(now).toISOString().slice(0, 10);
+
 export const DEFAULT_MODERATION_MODELS = '@cf/meta/llama-3.2-11b-vision-instruct,@cf/llava-hf/llava-1.5-7b-hf';
 
 const PROMPT = 'You are an image moderator for a Slay the Spire 2 fan site that teenagers use. '
@@ -79,7 +87,8 @@ export async function isBlocked(env, hash) {
 // → { id, status: 'ok' | 'pending' }
 //   | { error: 'bad_request', reason: 'image' | 'animated' | 'dimensions' }
 //   | { error: 'blocked' }                       (차단 목록, 숨김·차단된 이미지, AI 가 UNSAFE)
-//   | { error: 'rate_limited', reason: 'daily' }
+//   | { error: 'rate_limited', reason: 'daily' | 'site_daily' }
+//   | { error: 'storage_full' }                  (사이트 전체 저장 용량 한도)
 export async function storeModeratedImage(env, bytes, { userId, purpose = 'cup', type = null, dailyLimit = Infinity, timeoutMs, now = Date.now() } = {}) {
   const info = inspectImage(bytes, type || sniffType(bytes));
   if (!info.ok) return { error: 'bad_request', reason: info.reason };
@@ -96,7 +105,22 @@ export async function storeModeratedImage(env, bytes, { userId, purpose = 'cup',
     if (today.n >= dailyLimit) return { error: 'rate_limited', reason: 'daily' };
   }
 
-  const { verdict, note } = await classifyImage(env, info.bytes, { timeoutMs });
+  // 사이트 전체: 저장 용량, 하루 새 이미지 수, 하루 AI 호출 수
+  const day = dayKey(now);
+  const usage = new Map((await env.DB.prepare(
+    `SELECT key, n FROM usage_counters WHERE key IN ('img_bytes', ?1, ?2)`
+  ).bind(`img_day:${day}`, `ai_day:${day}`).all()).results.map(r => [r.key, r.n]));
+  if ((usage.get('img_bytes') || 0) + info.bytes.length > siteLimit(env, 'storageMb', 'IMAGE_STORAGE_MB') * 1024 * 1024) {
+    return { error: 'storage_full' };
+  }
+  if ((usage.get(`img_day:${day}`) || 0) >= siteLimit(env, 'imagesPerDay', 'IMAGES_PER_DAY_SITE')) {
+    return { error: 'rate_limited', reason: 'site_daily' };
+  }
+  let verdict = null, note = 'ai-daily-limit';
+  if ((usage.get(`ai_day:${day}`) || 0) < siteLimit(env, 'aiPerDay', 'AI_DAILY_LIMIT')) {
+    if (env.AI) await bump(env, `ai_day:${day}`, 1, day);
+    ({ verdict, note } = await classifyImage(env, info.bytes, { timeoutMs }));
+  }
   if (verdict === 'unsafe') {
     // 바이트는 저장하지 않고 해시만 남긴다
     await env.DB.prepare('INSERT OR IGNORE INTO image_blocklist (hash, created, reason) VALUES (?1, ?2, ?3)')
@@ -104,12 +128,28 @@ export async function storeModeratedImage(env, bytes, { userId, purpose = 'cup',
     return { error: 'blocked' };
   }
   const status = verdict === 'safe' ? 'ok' : 'pending';
-  await env.DB.prepare(
+  const inserted = await env.DB.prepare(
     `INSERT OR IGNORE INTO images (id, user_id, type, bytes, size, created, status, ai, purpose)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
   ).bind(id, userId, info.type, info.bytes, info.bytes.length, now, status, note, purpose).run();
+  if (inserted.meta?.changes) {
+    await bump(env, 'img_bytes', info.bytes.length);
+    await bump(env, `img_day:${day}`, 1, day);
+  }
   const row = await env.DB.prepare('SELECT status FROM images WHERE id = ?1').bind(id).first();
   return { id, status: row?.status ?? status };
+}
+
+// 사용량 더하기. day 를 주면 지난 날짜 칸은 지운다.
+async function bump(env, key, by, day = null) {
+  const stmts = [env.DB.prepare(
+    'INSERT INTO usage_counters (key, n) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET n = n + ?2'
+  ).bind(key, by)];
+  if (day) {
+    const prefix = key.slice(0, key.indexOf(':') + 1);
+    stmts.push(env.DB.prepare('DELETE FROM usage_counters WHERE key >= ?1 AND key < ?2').bind(prefix, `${prefix}${day}`));
+  }
+  await env.DB.batch(stmts);
 }
 
 // ---------- 엣지 캐시 ----------

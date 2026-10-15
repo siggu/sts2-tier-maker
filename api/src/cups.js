@@ -224,9 +224,12 @@ async function uploadImage(c) {
   if (bytes.length > MAX_IMAGE_BYTES) return c.send({ error: 'too_large' }, 413);
 
   // 같은 그림은 같은 id: 이미 있으면 그대로 돌려준다 (하루 제한에도 세지 않는다)
-  const r = await storeModeratedImage(env, bytes, { userId: user.id, purpose: 'cup', type, dailyLimit: IMAGES_PER_DAY });
+  // ?purpose=avatar 면 프로필 사진 (관리자 화면에서 구분용)
+  const purpose = c.url.searchParams.get('purpose') === 'avatar' ? 'avatar' : 'cup';
+  const r = await storeModeratedImage(env, bytes, { userId: user.id, purpose, type, dailyLimit: IMAGES_PER_DAY });
   if (r.error === 'bad_request') return bad(c, r.reason);
   if (r.error === 'blocked') return c.send({ error: 'blocked' }, 400);
+  if (r.error === 'storage_full') return c.send({ error: 'storage_full' }, 507);
   if (r.error) return c.send({ error: r.error, reason: r.reason }, 429);
   return c.send({ id: r.id, ref: `img:${r.id}`, status: r.status });
 }
