@@ -3,6 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!--
+    콘텐츠 보안 정책(CSP). 스크립트가 끼어들어도 할 수 있는 일을 줄인다 (로그인 토큰이 localStorage 에 있다).
+    GitHub Pages 는 응답 헤더를 못 바꿔 meta 로 넣는다 — 그래서 frame-ancestors·report-uri 는 쓸 수 없다(meta 에서는 무시됨).
+    - script-src: 우리 파일(js/*.js, vendor/nsfwjs)과 구글 로그인 스크립트만. 인라인 스크립트·eval 은 막는다.
+      (nsfwjs 안의 long.js 가 WebAssembly 를 써 보려다 막히면 JS 로 계산한다 — 'wasm-unsafe-eval' 은 필요 없다.)
+    - style-src: 우리 css, 구글 글꼴 css, Pretendard(jsDelivr), 구글 로그인 버튼 css(gsi/style).
+      'unsafe-inline' 은 구글 로그인 스크립트가 <style> 과 style="…" 을 넣기 때문 (우리 코드는 el.style 만 쓴다).
+    - font-src: 구글 글꼴 파일(fonts.gstatic.com), Pretendard 글꼴(jsDelivr).
+    - img-src: 우리 그림, data:·blob:(캔버스로 그린 기본 이미지·올린 사진 미리보기·관리자 화면, 파비콘), API 의 /img/<id>.
+    - connect-src: data/*.json·검사 모델(같은 출처), API, 구글 로그인(gsi/ 기록·FedCM).
+    - frame-src: 구글 로그인 버튼 iframe.
+    - API 주소를 ?api= 로 바꿔 시험할 때를 위해 http://localhost:*, http://127.0.0.1:* 를 열어 둔다. 다른 주소를 쓰려면 여기에 더한다.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net/gh/orioncactus/ https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net/gh/orioncactus/; img-src 'self' data: blob: https://sts2-balance-api.siggu100.workers.dev http://localhost:* http://127.0.0.1:*; connect-src 'self' https://sts2-balance-api.siggu100.workers.dev https://accounts.google.com/gsi/ http://localhost:* http://127.0.0.1:*; frame-src https://accounts.google.com/gsi/; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>첨탑의 티어 메이커 · Slay the Spire 2</title>
   <meta name="description" content="Slay the Spire 2 캐릭터·보스·카드·유물·포션 티어 리스트를 만들고, 무엇이 사기이고 약한지 함께 투표하세요.">
   <meta name="theme-color" content="#0d0f14">
