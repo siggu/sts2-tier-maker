@@ -19,6 +19,9 @@ import { checkImageSafe, preloadImageCheck } from './nsfw.js';
 const enc = encodeURIComponent;
 // bytes: 서버 한도, target: 저장 공간(D1)을 아끼려고 되도록 맞추는 크기
 // minPx: 서버가 받는 가장 짧은 변 (API.md 이미지 검열: 16–1024px)
+// 여러 장을 올릴 때 한꺼번에 올리는 수, 1분 제한에 걸렸을 때 다시 보내는 횟수
+const UPLOAD_PARALLEL = 4;
+const UPLOAD_RETRIES = 3;
 const LIMITS = { titleMin: 2, title: 60, desc: 300, name: 80, itemsMin: 4, items: 64, bytes: 300 * 1024, target: 100 * 1024, px: 512, minPx: 16 };
 const strLen = s => [...String(s ?? '')].length;
 const short = (s, n = 24) => { const a = [...String(s || '')]; return a.length > n ? `${a.slice(0, n - 1).join('')}…` : a.join(''); };
@@ -377,12 +380,21 @@ function uploadBlob(blob, onProgress) {
 }
 
 // 줄이기 → 브라우저 검사(nsfw.js, 야한 그림이면 올리지 않음) → 올리기. 서버도 다시 검사한다.
+// 여러 장을 한꺼번에 올리다 1분 요청 수 제한(429, 이유 없음)에 걸리면 잠시 기다렸다 다시 보낸다.
+// (하루 제한처럼 이유가 붙은 429 는 기다려도 안 되므로 바로 실패)
 async function uploadFile(file, onProgress) {
   const blob = await shrinkImage(file);
   const safe = await checkImageSafe(blob);
   if (!safe.ok) throw Object.assign(new Error('nsfw'), { code: 'img_nsfw' });
   onProgress?.(0.02);
-  return uploadBlob(blob, onProgress);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await uploadBlob(blob, onProgress);
+    } catch (err) {
+      if (err?.status !== 429 || err.reason || attempt >= UPLOAD_RETRIES) throw err;
+      await new Promise(r => setTimeout(r, 4000 * (attempt + 1)));
+    }
+  }
 }
 
 function uploadErrorText(err) {
@@ -1185,11 +1197,16 @@ function viewNew(ctx) {
     });
     drawRows(named ? undefined : rows[0].k);
     changed();
-    // 하나씩 차례로 올린다
-    for (let i = 0; i < rows.length; i++) {
-      if (st.items.includes(rows[i])) await uploadInto(rows[i], use[i], named);
-      else rows[i].busy = null;
-    }
+    // UPLOAD_PARALLEL 장씩 함께 올린다 — 한 장의 줄이기·검사·서버 AI 판정을 다른 장이 기다리지 않게
+    let next = 0;
+    const lane = async () => {
+      while (next < rows.length) {
+        const i = next++;
+        if (st.items.includes(rows[i])) await uploadInto(rows[i], use[i], named);
+        else rows[i].busy = null;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, rows.length) }, lane));
   }
   const addFromImages = async () => addImageRows(await files.pick({ multiple: true }));
   const addFromClipboard = async () => { const file = await readClipboardImage(); if (file) addImageRows([file], false); };
@@ -1303,6 +1320,8 @@ function viewNew(ctx) {
   );
   drawRows();
   changed();
+  // 사진을 고르기 전에 검사 모델을 미리 받아 데워 둔다 (첫 사진도 바로 검사되게)
+  setTimeout(preloadImageCheck, 1500);
 }
 
 // POST /cups. auth.js 의 api() 와 같되, 항목 오류의 index 를 오류에 남긴다.

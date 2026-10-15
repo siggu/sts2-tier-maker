@@ -15,7 +15,7 @@ GOOGLE_CLIENT_ID = "713762759027-mo3pdgg1f1pg1jdoobqojvc5lfbo6qo9.apps.googleuse
 # 관리자 구글 sub (쉼표로 여러 개). 관리자는 아무 글·댓글이나 지울 수 있고 올린 이미지를 검토한다 (#/admin).
 ADMIN_SUBS = ""
 # 관리자 사용자 id (users.id, 쉼표로 여러 개). 사이트의 프로필 메뉴 '내 ID' 에서 확인한다.
-ADMIN_USERS = ""
+ADMIN_USERS = "d10c9030097a8caa33997c0c17068079"
 # 올린 이미지 검열에 쓰는 Workers AI 모델 (앞에서부터 시도, 오류면 다음). 모두 실패하면 'pending' 으로 저장해 관리자가 검토한다.
 # 라마 3.2 비전 모델은 계정에서 한 번 라이선스에 동의해야 쓸 수 있다 (API.md).
 MODERATION_MODELS = "@cf/meta/llama-3.2-11b-vision-instruct,@cf/llava-hf/llava-1.5-7b-hf"

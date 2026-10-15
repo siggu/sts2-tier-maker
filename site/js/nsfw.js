@@ -33,7 +33,14 @@ function loadModel() {
   modelPromise ||= (async () => {
     if (!window.nsfwjs) await loadScript(NSFW_SCRIPT);
     if (!window.nsfwjs) throw new Error('nsfwjs');
-    return window.nsfwjs.load(MODEL_URL, { size: MODEL_SIZE });
+    const model = await window.nsfwjs.load(MODEL_URL, { size: MODEL_SIZE });
+    // 첫 판정은 그래픽 준비(셰이더 컴파일)로 느리다 — 빈 그림으로 한 번 미리 돌려 둔다
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = MODEL_SIZE;
+      await model.classify(c);
+    } catch { /* 실제 판정 때 다시 시도된다 */ }
+    return model;
   })().catch(err => {
     console.warn('nsfw model', err);
     return null;

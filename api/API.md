@@ -179,7 +179,7 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 
 | 요청 | 설명 |
 |---|---|
-| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. 가로·세로 16–1024px, 움직이는 그림(APNG·애니메이션 WebP) 금지. 메타데이터를 지운 뒤 id = sha256(정리한 파일) 앞 32자리 hex — 같은 그림은 같은 id(오류 아님). 그다음 **이미지 검열**(아래). IP 당 1분 20개, 한 사람이 하루에 새 이미지 300개, 사이트 전체 한도(아래 **사이트 전체 한도**). `?purpose=avatar` 면 프로필 사진용(관리자 화면 구분). `{ id, ref: 'img:<id>', status: 'ok'|'pending' }` |
+| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. 가로·세로 16–1024px, 움직이는 그림(APNG·애니메이션 WebP) 금지. 메타데이터를 지운 뒤 id = sha256(정리한 파일) 앞 32자리 hex — 같은 그림은 같은 id(오류 아님). 그다음 **이미지 검열**(아래). IP 당 1분 90개, 한 사람이 하루에 새 이미지 300개, 사이트 전체 한도(아래 **사이트 전체 한도**). `?purpose=avatar` 면 프로필 사진용(관리자 화면 구분). `{ id, ref: 'img:<id>', status: 'ok'|'pending' }` |
 | `GET /img/:id` | 이미지 바이트 (`status` 가 `ok`·`pending` 인 것만, 숨김·차단·없으면 404). `Content-Type` 은 올릴 때 형식, `Cache-Control: public, max-age=86400`, `Access-Control-Allow-Origin: *`(canvas 에 그릴 수 있게), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cross-Origin-Resource-Policy: cross-origin`. 엣지 캐시(Cache API, 열쇠 = 요청 주소)에는 1시간 둔다. |
 | `POST /cups` 🔒 `{ title, description?, cover?, items: [{ name, img? }] }` | 만들기 → `{ cup }`. 제목 2–60자(한 줄), 설명 0–300자(줄바꿈 가능), 항목 4–64개, 항목 이름 1–80자(한 줄). `cover`·`img` 는 빼면 `null`. 항목 id 는 서버가 순서대로 `'i1'…'iN'`. 사용자당 1분 3개, 하루 10개(`reason: 'daily'`). |
 | `GET /cups?sort=new|top&cursor=&author=` | `{ cups: [cup], next }` (20개씩). `sort` 기본 `new`. `top` = 좋아요 → 판 수 → 최신 순. `author` 는 users.id. 숨겨진 월드컵은 작성자·관리자에게만. |

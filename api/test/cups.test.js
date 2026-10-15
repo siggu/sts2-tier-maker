@@ -230,10 +230,10 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   assert.equal(r.status, 200);
   const jpegRef = r.data.ref;
 
-  // IP 당 1분 20개
+  // IP 당 1분 90개
   resetLimits();
   const statuses = [];
-  for (let i = 0; i < 21; i++) statuses.push((await call('POST', '/images', { token: A, raw: png(), type: 'image/png', ipAddr: '10.9.9.9' })).status);
+  for (let i = 0; i < 91; i++) statuses.push((await call('POST', '/images', { token: A, raw: png(), type: 'image/png', ipAddr: '10.9.9.9' })).status);
   assert.deepEqual(statuses.slice(-2), [200, 429]);
 
   // ---- 이미지 받기 ----
