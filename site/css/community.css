@@ -112,7 +112,8 @@
   content: "✦"; position: absolute; left: 2px; top: 0;
   color: var(--gold); font-size: 13px;
 }
-.acct-gbtn { display: flex; justify-content: center; align-items: center; min-height: 48px; }
+/* 페이지는 color-scheme: dark 인데 구글 버튼(iframe)은 밝은 문서라, 둘이 다르면 크롬이 iframe 뒤를 흰색으로 칠한다. */
+.acct-gbtn { display: flex; justify-content: center; align-items: center; min-height: 48px; color-scheme: light; }
 .acct-loading { color: var(--muted); font-size: 13.5px; }
 .acct-status { margin: 0; min-height: 1em; text-align: center; color: var(--muted); font-size: 13.5px; }
 .acct-status:empty { display: none; }
