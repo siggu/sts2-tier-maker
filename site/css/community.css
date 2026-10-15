@@ -34,6 +34,7 @@
 .acct-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-chip .ic-caret { font-size: 16px; color: var(--muted); }
 
+.popover:has(> .acct-menu) { width: min(260px, calc(100vw - 16px)); }
 .acct-menu { display: grid; gap: 2px; margin: -4px; }
 .acct-menu-head { display: flex; align-items: center; gap: 10px; padding: 6px 8px 10px; margin-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
 .acct-menu-who { display: grid; min-width: 0; }
