@@ -20,19 +20,26 @@
 | `src/account.js` | `/auth/*`, `/me*`, `/gallery*`, `/comments*`, `/items/*/comments`, `/report` |
 | `src/play.js` | `/tiers/aggregate`, `/versus*` (월드컵) |
 | `src/cups.js` | `/images`, `/img/:id`, `/cups*` (사용자 월드컵) |
+| `src/image.js` | 올린 이미지 검사·정리 (순수 함수): 형식(매직 바이트), 가로·세로 16–1024px, 움직이는 그림 거르기, 메타데이터 지우기 |
+| `src/moderation.js` | 이미지 검열: `storeModeratedImage(env, bytes, { userId, purpose })` (정리 → 차단 목록 → Workers AI → 저장), 이미지 신고, 관리자 검토, 엣지 캐시 지우기 |
+| `src/admin.js` | `/admin/*` (관리자: 이미지 검토) |
 | `src/bracket.js` | 월드컵 한 판의 대진 검사(`checkBracket`)와 대진 크기를 반영한 수치(`bracketStats`) — play.js·cups.js 공용 |
 | `migrations/0002_accounts.sql` | users, sessions, user_tiers, posts, reactions, comments, comment_likes, reports |
 | `migrations/0003_play.sql` | versus_votes, versus_ratings |
 | `migrations/0004_gallery_kind_worldcup.sql` | worldcup_stats (월드컵 부분) |
 | `migrations/0005_cups.sql` | cups, cup_items, cup_likes, images (사용자 월드컵) |
 | `migrations/0006_bracket_stats.sql` | worldcup_stats·cup_items 에 expected, progress, tracked, tracked_champ |
+| `migrations/0007_image_moderation.sql` | images 에 status, reports, ai, purpose, reviewed_by, reviewed_at; image_blocklist |
 
-`handleAccount` / `handlePlay` / `handleCups` 는 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
+`handleAccount` / `handlePlay` / `handleCups` / `handleAdmin` 은 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
 
 ## 설정 (wrangler.toml `[vars]`)
 
 - `GOOGLE_CLIENT_ID` — 구글 OAuth 클라이언트 ID (공개 값). 비어 있으면 `/auth/google` 은 `503 { error: 'login_disabled' }`.
-- `ADMIN_SUBS` — 관리자 구글 sub 목록(쉼표). 관리자는 아무 글·댓글이나 지울 수 있다.
+- `ADMIN_SUBS` — 관리자 구글 sub 목록(쉼표). 관리자는 아무 글·댓글이나 지울 수 있고 올린 이미지를 검토한다(`/admin/*`, 사이트 `#/admin`).
+- `ADMIN_USERS` — 관리자 사용자 id(`users.id`, 쉼표). `ADMIN_SUBS` 와 둘 중 하나에 있으면 관리자. 사이트 프로필 메뉴의 '내 ID' 에서 자기 id 를 볼 수 있다.
+- `MODERATION_MODELS` — 이미지 검열에 쓰는 Workers AI 모델(쉼표, 앞에서부터 시도). 기본 `@cf/meta/llama-3.2-11b-vision-instruct,@cf/llava-hf/llava-1.5-7b-hf`.
+- `[ai] binding = "AI"` — Workers AI. 없으면(또는 배포 토큰에 Workers AI 권한이 없어 빼고 배포하면) 새 이미지는 모두 `pending`.
 
 ## 표 (0002_accounts.sql)
 
@@ -112,7 +119,7 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 | `POST /items/:category/:id/comments` `{ body }` 🔒 | `{ comment }` |
 | `DELETE /comments/:id` 🔒 | 작성자나 관리자 (내용을 지우고 deleted = 1) |
 | `POST /comments/:id/like` `{ on: bool }` 🔒 | `{ likes, myLike }` |
-| `POST /report` `{ kind: 'post'|'comment'|'cup', id, reason? }` 🔒 | `{ ok }` (`cup` 은 사용자 월드컵) |
+| `POST /report` `{ kind: 'post'|'comment'|'cup'|'image', id, reason? }` 🔒 | `{ ok }` (`cup` 은 사용자 월드컵, `image` 는 올린 이미지 — id 32자리 hex, 아래 **이미지 검열**) |
 
 `comment` = `{ id, body, author: { id, name, avatar }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
 (덧붙임: `hidden: bool`. 지운 댓글은 목록에 나오지 않는다. 본문은 원문 그대로 저장·반환하므로 화면에서 이스케이프한다.)
@@ -172,8 +179,8 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 
 | 요청 | 설명 |
 |---|---|
-| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. id = sha256(파일) 앞 32자리 hex — 같은 파일은 같은 id(오류 아님). IP 당 1분 20개, 한 사람이 하루에 새 이미지 300개. `{ id, ref: 'img:<id>' }` |
-| `GET /img/:id` | 이미지 바이트. `Content-Type` 은 올릴 때 형식, `Cache-Control: public, max-age=31536000, immutable`, `Access-Control-Allow-Origin: *`(canvas 에 그릴 수 있게), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cross-Origin-Resource-Policy: cross-origin`. 없으면 404. |
+| `POST /images` 🔒 | 본문 = 이미지 파일 그대로. `Content-Type`: `image/webp`·`image/jpeg`·`image/png`, ≤ 300KB, 파일 앞부분(매직 바이트)이 그 형식이어야 한다. 가로·세로 16–1024px, 움직이는 그림(APNG·애니메이션 WebP) 금지. 메타데이터를 지운 뒤 id = sha256(정리한 파일) 앞 32자리 hex — 같은 그림은 같은 id(오류 아님). 그다음 **이미지 검열**(아래). IP 당 1분 20개, 한 사람이 하루에 새 이미지 300개. `{ id, ref: 'img:<id>', status: 'ok'|'pending' }` |
+| `GET /img/:id` | 이미지 바이트 (`status` 가 `ok`·`pending` 인 것만, 숨김·차단·없으면 404). `Content-Type` 은 올릴 때 형식, `Cache-Control: public, max-age=86400`, `Access-Control-Allow-Origin: *`(canvas 에 그릴 수 있게), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cross-Origin-Resource-Policy: cross-origin`. 엣지 캐시(Cache API, 열쇠 = 요청 주소)에는 1시간 둔다. |
 | `POST /cups` 🔒 `{ title, description?, cover?, items: [{ name, img? }] }` | 만들기 → `{ cup }`. 제목 2–60자(한 줄), 설명 0–300자(줄바꿈 가능), 항목 4–64개, 항목 이름 1–80자(한 줄). `cover`·`img` 는 빼면 `null`. 항목 id 는 서버가 순서대로 `'i1'…'iN'`. 사용자당 1분 3개, 하루 10개(`reason: 'daily'`). |
 | `GET /cups?sort=new|top&cursor=&author=` | `{ cups: [cup], next }` (20개씩). `sort` 기본 `new`. `top` = 좋아요 → 판 수 → 최신 순. `author` 는 users.id. 숨겨진 월드컵은 작성자·관리자에게만. |
 | `GET /cups/:id` | `{ cup, items: [{ id, name, img, champ, entries, wins, losses, expected, progress, tracked, trackedChamp }] }` (항목 순서대로. 뒤의 넷은 위 **대진 크기 수치**). 숨겨진 월드컵은 작성자·관리자 아니면 404. |
@@ -199,7 +206,8 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 
 400 `reason` (만들기·고치기): `json`, `title`, `description`, `cover`(형식이 틀렸거나 올리지 않은 이미지), `items`(배열이 아니거나 4–64개 밖),
 `item`·`name`·`img` (이때 `index` = 문제 항목 위치, 0부터. `img` 는 형식이 틀렸거나 올리지 않은 이미지).
-이미지: `type`(지원하지 않는 Content-Type), `image`(비었거나 내용이 형식과 다름), 413 `too_large`(300KB 초과).
+이미지: `type`(지원하지 않는 Content-Type), `image`(비었거나 내용이 형식과 다르거나 깨짐), `dimensions`(가로·세로가 16–1024px 밖),
+`animated`(움직이는 그림), 413 `too_large`(300KB 초과), 400 `{ error: 'blocked' }`(검열에 걸림 — 아래).
 목록: `sort`, `author`, `cursor`. 좋아요: `on`. 없는 월드컵·이미지·형식이 틀린 id 는 404, 남의 월드컵 고치기·지우기는 403.
 
 ```sql
@@ -208,17 +216,58 @@ cup_items(cup_id, id, pos, name, img, champ, entries, wins, losses,
           expected, progress, tracked, tracked_champ,                     -- 0006, 대진 크기 수치
           PRIMARY KEY(cup_id, id))                                         -- id = 'i' || pos
 cup_likes(cup_id, user_id, PRIMARY KEY(cup_id, user_id))
-images(id TEXT PK, user_id, type, bytes BLOB, size, created)                                   -- id = sha256 앞 32 hex
+images(id TEXT PK, user_id, type, bytes BLOB, size, created,                                  -- id = sha256(정리한 바이트) 앞 32 hex
+       status TEXT DEFAULT 'ok', reports INTEGER DEFAULT 0, ai TEXT, purpose TEXT DEFAULT 'cup',  -- 0007
+       reviewed_by TEXT, reviewed_at INTEGER)
+image_blocklist(hash TEXT PK, created INTEGER, reason TEXT)                                     -- 0007, hash = images.id 와 같은 값
 ```
 댓글은 `comments` 표에 `target = 'cup:<id>'`, 신고는 `reports` 표에 `kind = 'cup'`.
+월드컵을 만들거나 표지를 바꿀 때 `img:` 참조는 `ok`·`pending` 이미지여야 한다(숨김·차단은 400 `cover`/`img`).
+
+## 이미지 검열 (image.js, moderation.js, admin.js)
+
+올린 이미지는 저장 전에 이렇게 거른다 (`storeModeratedImage(env, bytes, { userId, purpose, type?, dailyLimit? })` —
+나중에 프로필 사진도 같은 함수를 쓴다):
+
+1. **검사·정리** (image.js `inspectImage`): 매직 바이트, 가로·세로 16–1024px, 움직이는 그림 금지(PNG `acTL`, WebP `ANIM`·`ANMF`·VP8X 애니메이션 플래그).
+   메타데이터를 지운다 — PNG: 그리는 데 필요한 조각(IHDR·PLTE·IDAT·IEND·tRNS·색 공간·pHYs 등)만 남기고 `tEXt`·`zTXt`·`iTXt`·`eXIf`·`tIME`·모르는 부가 조각을 버림.
+   JPEG: APP0(JFIF)·APP14(Adobe) 만 남기고 APP1–APP13·APP15(EXIF·XMP·ICC 등)·COM 을 버림. WebP: `EXIF`·`XMP `·모르는 조각을 버리고 VP8X 플래그·RIFF 크기를 고침.
+   어느 형식이든 파일 끝 뒤에 붙은 바이트도 버린다. 해시(id)·저장·AI 판정은 모두 정리한 바이트로.
+2. **차단 목록**: `image_blocklist` 에 있는 해시면 400 `{ error: 'blocked' }` (AI 를 부르지 않는다). 이미 있는 이미지가 숨김·차단이어도 `blocked`.
+   이미 있는 `ok`·`pending` 이미지면 그대로 그 id (하루 제한·AI 없이).
+3. **Workers AI** (`env.AI`): `MODERATION_MODELS` 를 차례로 시도해 `SAFE`/`UNSAFE` 한 단어로 답하게 한다(나체·성적, 고어·잔인한 폭력, 혐오 상징, 마약, 자해 등은 UNSAFE;
+   게임 그림·만화 같은 몬스터는 SAFE). 모델이 오류를 내면 다음 모델로 — 라마 3.2 비전의 라이선스 동의 요구(5016)도 오류로 보고 넘어간다(`agree` 를 대신 보내지 않는다).
+   전체 8초 제한.
+   - `UNSAFE` → 400 `{ error: 'blocked' }`, 해시를 `image_blocklist` 에 넣는다(바이트는 저장하지 않음).
+   - `SAFE` → `status = 'ok'`.
+   - AI 없음·모두 오류·시간 초과 → `status = 'pending'` (보이지만 관리자 검토 목록에 뜬다).
+   `images.ai` 에 판정을 짧게 남긴다 (예: `llama-3.2-11b-vision-instruct: SAFE`, `no-ai`, `timeout / …`).
+
+**신고**: `POST /report { kind: 'image', id }` — 한 사람이 한 번, 서로 다른 3명이면 `status = 'hidden'` (`/img` 404, 엣지 캐시에서 지움). `images.reports` = 신고 수.
+사이트는 사용자 월드컵 순위 화면에서 올린 이미지 옆의 '이미지 신고' 로 보낸다.
+
+**관리자** (`ADMIN_SUBS` 또는 `ADMIN_USERS`. 로그인 안 함 401, 관리자 아님 403):
+
+| 요청 | 설명 |
+|---|---|
+| `GET /admin/images?status=pending|reported|hidden|blocked&cursor=` | `{ images: [image], next }` (최신순 30개씩, `status` 기본 `pending`). `reported` = 아직 보이는(`ok`·`pending`) 이미지 가운데 신고가 있는 것. |
+| `POST /admin/images/:id` `{ action: 'approve'|'hide'|'block' }` | `{ image }`. `approve` → `ok`, 신고를 비우고(다시 3명이 신고해야 숨겨짐) 차단 목록에서 뺀다. `hide` → `hidden`. `block` → `blocked` + 차단 목록(같은 파일 다시 올리기 금지). 숨김·차단은 엣지 캐시에서도 지운다. 없는 이미지 404, 틀린 action 400 `action`. |
+| `GET /admin/img/:id` | 상태와 관계없이 이미지 바이트. `Cache-Control: no-store`. (화면은 `Authorization` 을 붙여 fetch 해 blob 주소로 그린다) |
+
+`image` = `{ id, status, reports, ai, type, size, purpose, created, user: { id, name }, reviewedBy, reviewedAt, cups: [{ id, title }] }`
+(`cups` = 이 이미지를 표지·항목으로 쓰는 월드컵, 최대 5개).
+
+엣지 캐시: Cache API 는 데이터센터마다 따로라 지우기는 요청을 받은 데이터센터에만 닿는다. 그래서 `/img` 는 엣지 캐시에 1시간만 두고
+(다른 데이터센터에서도 숨김·차단이 1시간 안에 반영), 브라우저 캐시는 하루(`max-age=86400`)다.
 
 ## 오류 코드·제한 (account.js 구현 기준)
 
 | 상태 | `error` | 언제 |
 |---|---|---|
+| 400 | `blocked` | 이미지가 검열에 걸림 (차단 목록·AI 판정·숨김/차단된 이미지) |
 | 400 | `bad_request` | `reason`: `json`, `credential`, `name`, `template`, `title`, `empty`(배치한 항목 없는 글), `state`·`state.title`·`state.tiers`·`state.label`·`state.color`·`state.items`·`state.updatedAt`, `too_many_tiers`(동기화 300개 초과), `sort`, `cursor`, `author`, `v`, `on`, `body`, `kind`, `id`, `reason`(신고 사유 200자 초과) |
 | 401 | `auth` | 세션 없음·틀림·만료. `/auth/google` 에서는 `reason`: `format`·`alg`·`kid`·`signature`·`iss`·`aud`·`exp`·`iat`·`sub` |
-| 403 | `forbidden` | 남의 글·댓글 지우기 |
+| 403 | `forbidden` | 남의 글·댓글 지우기, 관리자가 아닌데 `/admin/*` |
 | 404 | `not_found` | 없는 글·댓글·항목, 숨겨진 글(작성자·관리자 아님) |
 | 405 | `method_not_allowed` | 경로는 있으나 메서드가 다름 |
 | 413 | `too_large` | 요청 본문 32KB(티어표·글) / 8KB(그 밖) 초과, 티어표 state 24KB 초과 |

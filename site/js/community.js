@@ -43,6 +43,8 @@ const ICONS = {
   grid: 'M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z',
   caret: 'M7 10l5 5 5-5z',
   face: 'M9 11.75a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zm6 0a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21.71.33 1.47.33 2.26 0 4.41-3.59 8-8 8z',
+  shield: 'M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z',
+  badge: 'M20 7h-5V4c0-1.1-.9-2-2-2h-2c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM9 12c.83 0 1.5.67 1.5 1.5S9.83 15 9 15s-1.5-.67-1.5-1.5S8.17 12 9 12zm3 6H6v-.43c0-.6.36-1.15.92-1.39.64-.28 1.34-.43 2.08-.43s1.44.15 2.08.43c.55.24.92.78.92 1.39V18zm1-9h-2V4h2v5zm5 7.5h-4V15h4v1.5zm0-3h-4V12h4v1.5z',
 };
 export function icon(name) {
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -321,6 +323,8 @@ function openMenu(anchor) {
     item('grid', t('acct.myGallery'), () => { location.hash = galleryHref(null, { author: user.id }); }),
     item('face', t('acct.avatar'), () => avatarDialog(ctxRef.db)),
     item('edit', t('acct.rename'), renameDialog),
+    item('badge', t('acct.myId'), myIdDialog),
+    user.admin ? item('shield', t('admin.nav'), () => { location.hash = '#/admin'; }) : null,
     item('logout', t('acct.logout'), () => logout(), 'danger'),
   );
   close = ctxRef.popover(anchor, menu);
@@ -358,6 +362,31 @@ function renameDialog() {
   );
   const m = openModal({ title: t('acct.rename'), body: form, className: 'acct-small' });
   input.select();
+}
+
+// 내 사용자 id 보기·복사 (관리자로 등록해 달라고 할 때 보낸다: api 의 ADMIN_USERS)
+function myIdDialog() {
+  const user = currentUser();
+  if (!user) return;
+  const input = h('input', { type: 'text', value: user.id, readonly: true, class: 'acct-id-input', 'aria-label': t('acct.myId'), spellcheck: 'false' });
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(user.id);
+      toast(t('acct.myIdCopied'));
+    } catch {
+      input.focus();
+      input.select();
+    }
+  };
+  const body = h('div', { class: 'acct-form' },
+    h('p', { class: 'acct-help' }, t('acct.myIdHelp')),
+    h('div', { class: 'acct-id-row' }, input,
+      h('button', { class: 'btn primary', type: 'button', onclick: copy }, t('acct.copy'))),
+    h('div', { class: 'acct-form-actions' },
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => m.close() }, t('acct.close'))),
+  );
+  const m = openModal({ title: t('acct.myId'), body, className: 'acct-small' });
+  input.addEventListener('focus', () => input.select());
 }
 
 // ================================================================ 메뉴 링크·라우팅
@@ -852,7 +881,7 @@ async function viewPost(postId, ctx) {
 
 // ================================================================ 신고
 
-// (사용자 월드컵 cups.js 도 쓴다: kind 'cup', lead 로 안내 문구를 넘긴다)
+// (사용자 월드컵 cups.js 도 쓴다: kind 'cup'·'image'(올린 이미지), lead 로 안내 문구를 넘긴다)
 export async function reportDialog(kind, id, postKind = 'tier', lead = null) {
   if (!(await requireLogin(t('acct.reason.report')))) return;
   const REASONS = ['spam', 'abuse', 'inappropriate', 'other'];

@@ -114,6 +114,8 @@ export function errorText(err) {
   if (code === 'network') return t('acct.err.network');
   if (code === 'auth') return t('acct.err.auth');
   if (code === 'login_disabled') return t('acct.err.loginDisabled');
+  // 올린 이미지가 검열에 걸림 (차단 목록·AI 판정, API.md 이미지 검열)
+  if (code === 'blocked') return t('acct.err.blocked');
   if (err?.status === 429 && err.reason === 'daily') return t('acct.err.daily');
   if (code === 'rate' || code === 'rate_limited' || err?.status === 429) return t('acct.err.rate');
   if (err?.status === 400 && err.reason === 'empty') return t('gallery.publishEmpty');

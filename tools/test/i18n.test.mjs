@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const JS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'site', 'js');
 const LANGS = ['ko', 'en', 'ja', 'zh-Hans', 'zh-Hant'];
-const FEATURES = ['i18n-account.js', 'i18n-play.js', 'i18n-cups.js'];
+const FEATURES = ['i18n-account.js', 'i18n-play.js', 'i18n-cups.js', 'i18n-moderation.js'];
 
 // site/js 에는 package.json 이 없어 node 가 ESM 으로 읽지 못할 수 있으므로 소스를 data: 모듈로 불러온다.
 async function load(file) {

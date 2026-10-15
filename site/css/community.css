@@ -131,6 +131,14 @@
 .acct-help { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .acct-help.error { color: #ffb4b0; font-weight: 600; }
 .acct-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* 내 ID */
+.acct-id-row { display: flex; gap: 8px; }
+.acct-id-input {
+  flex: 1 1 auto; min-width: 0; min-height: 38px; padding: 0 10px;
+  border-radius: 8px; border: 1px solid rgba(255, 255, 255, .16); background: #101217; color: var(--gold-hi);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px; letter-spacing: .02em;
+}
+.acct-id-input:focus { border-color: var(--gold); outline: none; }
 .acct-radios { display: grid; gap: 4px; margin: 0; padding: 0; border: 0; }
 .acct-radios label {
   display: flex; align-items: center; gap: 10px;

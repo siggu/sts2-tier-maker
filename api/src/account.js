@@ -3,6 +3,7 @@
 import { json, ipHashOf, rateLimited } from './http.js';
 import { getUser, verifyGoogleIdToken, keyResolverFor, createSession, deleteSession, bearerToken, publicUser, randomHex, avatarOf, isFace, IMG_AVATAR } from './auth.js';
 import { isAnonVoter } from './votes.js';
+import { reportImage } from './moderation.js';
 
 const VOTE_NAMES = { 1: 'nerf', 2: 'fair', 3: 'buff' };
 const PAGE_SIZE = 20;
@@ -19,6 +20,7 @@ const TEMPLATE_RE = /^[a-z0-9][A-Za-z0-9.-]{0,79}$/;
 const ITEM_ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const ID_RE = /^[0-9a-f]{24}$/;      // 글·댓글 id (12바이트 hex)
 const USER_ID_RE = /^[0-9a-f]{32}$/;
+const IMAGE_ID_RE = /^[0-9a-f]{32}$/; // 올린 이미지 id (cups.js)
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 // 갤러리 글 종류. 'balance' 글은 밸런스 투표(너프/적당/버프 3줄, 색 고정)를 티어표와 같은 모양으로 담는다.
 const POST_KINDS = ['tier', 'balance'];
@@ -608,7 +610,8 @@ async function likeComment(c, id) {
 // ---------- 신고 ----------
 
 // 신고할 수 있는 것과 그 표. 'cup' 은 사용자 월드컵 (cups.js, 0005).
-const REPORT_TABLES = { post: 'posts', comment: 'comments', cup: 'cups' };
+// 'image' 는 올린 이미지 (id 32자리 hex) — 3명이 신고하면 images.status = 'hidden' (moderation.js).
+const REPORT_TABLES = { post: 'posts', comment: 'comments', cup: 'cups', image: 'images' };
 
 async function findCupRow(c, id) {
   const row = await c.env.DB.prepare('SELECT id, user_id, hidden FROM cups WHERE id = ?1').bind(id).first();
@@ -622,11 +625,16 @@ async function report(c) {
   if (res) return res;
   const { kind, id } = body;
   if (!Object.hasOwn(REPORT_TABLES, kind)) return bad(c, 'kind');
-  if (typeof id !== 'string' || !ID_RE.test(id)) return bad(c, 'id');
+  if (typeof id !== 'string' || !(kind === 'image' ? IMAGE_ID_RE : ID_RE).test(id)) return bad(c, 'id');
   let reason = null;
   if (body.reason !== undefined && body.reason !== null && body.reason !== '') {
     reason = typeof body.reason === 'string' ? body.reason.replace(UNSAFE_CHARS, '').trim() : '';
     if (!reason || len(reason) > 200) return bad(c, 'reason');
+  }
+
+  if (kind === 'image') {
+    const r = await reportImage(env, { id, userId: user.id, reason, origin: c.url.origin });
+    return r.error ? notFound(c) : c.send({ ok: true });
   }
 
   const row = kind === 'post' ? await findPost(c, id) : kind === 'cup' ? await findCupRow(c, id) : await findComment(c, id);

@@ -5,6 +5,11 @@ import { getUser, randomHex, avatarOf } from './auth.js';
 import { isAnonVoter } from './votes.js';
 import { checkBracket, bracketStats } from './bracket.js';
 import { UNSAFE_CHARS, listComments, addComment } from './account.js';
+import { IMAGE_TYPES, imageTypeOf, imageId } from './image.js';
+import { storeModeratedImage, imageCacheKey, VISIBLE_STATUSES } from './moderation.js';
+
+// 이미지 형식 검사는 image.js 로 옮겼다 (예전 이름 그대로 내보낸다)
+export { IMAGE_TYPES, imageTypeOf, imageId };
 
 const PAGE_SIZE = 20;
 export const MIN_ITEMS = 4;
@@ -18,15 +23,18 @@ const USER_LIMITS = { cupnew: 3, cupedit: 10, cuplike: 60 }; // 사용자당 1�
 const IMG_RATE = 20;                // IP 당 1분
 const PLAY_RATE = 6;                // IP 당 1분
 const SAMPLE_SIZE = 4;
+const EDGE_CACHE_SEC = 3600;        // 엣지 캐시에 두는 시간 (숨김·차단이 다른 데이터센터에도 이 안에 닿게)
+const VISIBLE_SQL = VISIBLE_STATUSES.map(s => `'${s}'`).join(', ');
 
 const ID_RE = /^[0-9a-f]{24}$/;     // 월드컵 id (12바이트 hex)
 const USER_ID_RE = /^[0-9a-f]{32}$/;
 const IMAGE_ID_RE = /^[0-9a-f]{32}$/;
 const IMG_REF_RE = /^img:([0-9a-f]{32})$/;
 
-// 올린 이미지는 영원히 바뀌지 않는다 (id = 내용 해시). 사이트가 canvas 에 그릴 수 있게 출처 제한 없이 연다.
+// 올린 이미지 내용은 바뀌지 않지만(id = 내용 해시) 숨겨지거나 차단될 수 있어 하루만 캐시한다.
+// 사이트가 canvas 에 그릴 수 있게 출처 제한 없이 연다.
 const IMAGE_HEADERS = {
-  'Cache-Control': 'public, max-age=31536000, immutable',
+  'Cache-Control': 'public, max-age=86400',
   'X-Content-Type-Options': 'nosniff',
   'Content-Security-Policy': "default-src 'none'",
   'Cross-Origin-Resource-Policy': 'cross-origin',
@@ -199,30 +207,12 @@ export function tallyMatches(entrants, matches) {
   return Object.fromEntries(Object.entries(items).map(([id, s]) => [id, [s.w, s.l, s.p]]));
 }
 
-// 이미지 형식: Content-Type 과 파일 앞부분(매직 바이트)이 맞아야 한다
-const startsWith = (b, sig, at = 0) => b.length >= at + sig.length && sig.every((x, i) => b[at + i] === x);
-const ascii = s => [...s].map(ch => ch.charCodeAt(0));
-export const IMAGE_TYPES = {
-  'image/png': b => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  'image/jpeg': b => startsWith(b, [0xff, 0xd8, 0xff]),
-  'image/webp': b => startsWith(b, ascii('RIFF')) && startsWith(b, ascii('WEBP'), 8),
-};
-
-export function imageTypeOf(contentType) {
-  const t = (contentType || '').split(';')[0].trim().toLowerCase();
-  return Object.hasOwn(IMAGE_TYPES, t) ? t : null;
-}
-
-export async function imageId(bytes) {
-  const buf = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
-}
-
 // D1 은 BLOB 을 숫자 배열로, node:sqlite 는 Uint8Array 로 돌려준다
 const toBytes = v => (v instanceof Uint8Array ? v : new Uint8Array(v));
 
 // ---------- 이미지 ----------
 
+// 형식·크기 검사 → 정리(메타데이터 지우기) → 차단 목록 → AI 검열 → 저장 (moderation.js)
 async function uploadImage(c) {
   const { env, request, user } = c;
   if (await rateLimited(env, await ipHashOf(request, env), IMG_RATE, 'img')) return c.send({ error: 'rate_limited' }, 429);
@@ -232,20 +222,13 @@ async function uploadImage(c) {
   let bytes;
   try { bytes = new Uint8Array(await request.arrayBuffer()); } catch { return bad(c, 'image'); }
   if (bytes.length > MAX_IMAGE_BYTES) return c.send({ error: 'too_large' }, 413);
-  if (!IMAGE_TYPES[type](bytes)) return bad(c, 'image');
 
-  // 같은 파일은 같은 id: 이미 있으면 그대로 돌려준다 (하루 제한에도 세지 않는다)
-  const id = await imageId(bytes);
-  const known = await env.DB.prepare('SELECT 1 AS ok FROM images WHERE id = ?1').bind(id).first();
-  if (!known) {
-    const now = Date.now();
-    const today = await env.DB.prepare('SELECT COUNT(*) AS n FROM images WHERE user_id = ?1 AND created > ?2')
-      .bind(user.id, now - 86400000).first();
-    if (today.n >= IMAGES_PER_DAY) return c.send({ error: 'rate_limited', reason: 'daily' }, 429);
-    await env.DB.prepare('INSERT OR IGNORE INTO images (id, user_id, type, bytes, size, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-      .bind(id, user.id, type, bytes, bytes.length, now).run();
-  }
-  return c.send({ id, ref: `img:${id}` });
+  // 같은 그림은 같은 id: 이미 있으면 그대로 돌려준다 (하루 제한에도 세지 않는다)
+  const r = await storeModeratedImage(env, bytes, { userId: user.id, purpose: 'cup', type, dailyLimit: IMAGES_PER_DAY });
+  if (r.error === 'bad_request') return bad(c, r.reason);
+  if (r.error === 'blocked') return c.send({ error: 'blocked' }, 400);
+  if (r.error) return c.send({ error: r.error, reason: r.reason }, 429);
+  return c.send({ id: r.id, ref: `img:${r.id}`, status: r.status });
 }
 
 // 이미지 응답 헤더: 받은 CORS 에 더해 어느 출처든 읽게(*) 한다. Vary: Origin 은 필요 없다.
@@ -255,27 +238,28 @@ function imageResponse(c, body, type) {
   return new Response(body, { status: 200, headers });
 }
 
+// ok·pending 만 보낸다 (숨김·차단·없는 이미지는 404). 엣지 캐시 열쇠는 요청 주소 — 숨기거나 차단하면 지운다 (moderation.js).
 async function getImage(c, id) {
   if (!IMAGE_ID_RE.test(id)) return notFound(c);
   const cache = typeof caches === 'undefined' ? null : caches.default; // node 시험에는 caches 가 없다
-  const cacheKey = `https://cache.sts2-balance/img/${id}`;
+  const cacheKey = imageCacheKey(c.url.origin, id);
   const hit = cache && await cache.match(cacheKey);
   if (hit) return imageResponse(c, hit.body, hit.headers.get('Content-Type'));
 
-  const row = await c.env.DB.prepare('SELECT type, bytes FROM images WHERE id = ?1').bind(id).first();
+  const row = await c.env.DB.prepare(`SELECT type, bytes FROM images WHERE id = ?1 AND status IN (${VISIBLE_SQL})`).bind(id).first();
   if (!row) return notFound(c);
   const bytes = toBytes(row.bytes);
   if (cache) {
-    const stored = new Response(bytes, { headers: { ...IMAGE_HEADERS, 'Content-Type': row.type } });
+    const stored = new Response(bytes, { headers: { ...IMAGE_HEADERS, 'Cache-Control': `public, max-age=${EDGE_CACHE_SEC}`, 'Content-Type': row.type } });
     c.ctx?.waitUntil?.(cache.put(cacheKey, stored));
   }
   return imageResponse(c, bytes, row.type);
 }
 
-// 참조 가운데 올라와 있지 않은 이미지 id
+// 참조 가운데 올라와 있지 않은(또는 숨김·차단된) 이미지 id
 async function missingImages(env, ids) {
   if (!ids.length) return new Set();
-  const { results } = await env.DB.prepare('SELECT id FROM images WHERE id IN (SELECT value FROM json_each(?1))')
+  const { results } = await env.DB.prepare(`SELECT id FROM images WHERE id IN (SELECT value FROM json_each(?1)) AND status IN (${VISIBLE_SQL})`)
     .bind(JSON.stringify(ids)).all();
   const have = new Set(results.map(r => r.id));
   return new Set(ids.filter(id => !have.has(id)));

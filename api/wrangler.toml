@@ -12,8 +12,17 @@ preview_urls = false
 ALLOWED_ORIGINS = "https://siggu.github.io,http://localhost:8000,http://127.0.0.1:8000"
 # 구글 로그인 OAuth 클라이언트 ID (공개 값). 비어 있으면 로그인이 꺼진다. site/js/config.js 와 같은 값.
 GOOGLE_CLIENT_ID = "713762759027-mo3pdgg1f1pg1jdoobqojvc5lfbo6qo9.apps.googleusercontent.com"
-# 관리자 구글 sub (쉼표로 여러 개). 관리자는 아무 글·댓글이나 지울 수 있다.
+# 관리자 구글 sub (쉼표로 여러 개). 관리자는 아무 글·댓글이나 지울 수 있고 올린 이미지를 검토한다 (#/admin).
 ADMIN_SUBS = ""
+# 관리자 사용자 id (users.id, 쉼표로 여러 개). 사이트의 프로필 메뉴 '내 ID' 에서 확인한다.
+ADMIN_USERS = ""
+# 올린 이미지 검열에 쓰는 Workers AI 모델 (앞에서부터 시도, 오류면 다음). 모두 실패하면 'pending' 으로 저장해 관리자가 검토한다.
+# 라마 3.2 비전 모델은 계정에서 한 번 라이선스에 동의해야 쓸 수 있다 (API.md).
+MODERATION_MODELS = "@cf/meta/llama-3.2-11b-vision-instruct,@cf/llava-hf/llava-1.5-7b-hf"
+
+# 이미지 검열 (moderation.js). 배포 토큰에 Workers AI 권한이 없으면 배포 워크플로가 이 묶음을 빼고 배포한다.
+[ai]
+binding = "AI"
 
 # database_id 는 배포 워크플로가 계정의 D1 목록에서 찾아(없으면 만들어) 채운다.
 [[d1_databases]]
