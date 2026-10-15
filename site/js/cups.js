@@ -50,6 +50,7 @@ const PATHS = {
   close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
   upload: 'M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z',
   image: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z',
+  paste: 'M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z',
   search: 'M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
   link: 'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z',
   trophy: 'M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 15.9V19H7v2h10v-2h-4v-3.1a5.01 5.01 0 0 0 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z',
@@ -415,6 +416,46 @@ function filePicker() {
   };
 }
 
+// ================================================================ 클립보드 그림 붙여넣기
+
+// paste 이벤트의 그림 파일들 (files 가 비면 items 에서). 글자와 그림이 같이 있으면 그림을 쓴다.
+function clipImages(dt) {
+  if (!dt) return [];
+  const files = [...(dt.files || [])].filter(f => /^image\//.test(f.type));
+  if (files.length) return files;
+  return [...(dt.items || [])].filter(x => x.kind === 'file' && /^image\//.test(x.type)).map(x => x.getAsFile()).filter(Boolean);
+}
+
+// 붙여넣기 단추는 clipboard.read() 가 있는 브라우저에서만 (없으면 Ctrl+V 만)
+const canReadClipboard = () => typeof navigator.clipboard?.read === 'function';
+
+// 단추로 붙여넣기: 클립보드의 첫 그림 → File. 그림이 없거나 못 읽으면 알리고 null.
+// 누른 동작 안에서 바로 read() 를 불러야 브라우저가 허락한다.
+async function readClipboardImage() {
+  let items;
+  try {
+    items = await navigator.clipboard.read();
+  } catch {
+    toast(t('cups.paste.denied'));
+    return null;
+  }
+  for (const item of items || []) {
+    const type = item.types.find(x => /^image\//.test(x));
+    if (!type) continue;
+    try {
+      const blob = await item.getType(type);
+      preloadImageCheck();
+      return new File([blob], `clipboard.${type.slice(6).replace(/\W.*$/, '') || 'png'}`, { type });
+    } catch { /* 다음 것 */ }
+  }
+  toast(t('cups.paste.none'));
+  return null;
+}
+
+// 글을 쓰는 칸인지 (붙여넣기를 그 칸에 맡길지)
+const TEXT_FIELD = 'textarea, input:not([type=button], [type=checkbox], [type=radio], [type=file], [type=submit], [type=reset], [type=range], [type=color], [type=image])';
+const isTextField = el => Boolean(el?.isContentEditable || el?.matches?.(TEXT_FIELD));
+
 // ================================================================ 게임 이미지 고르기 창
 
 function pickGameImage(db) {
@@ -722,13 +763,21 @@ function coverEditor({ state, db, files, title, samples, onChange }) {
         h('p', { class: 'cups-help' }, auto ? t('cups.cover.auto') : refKind(state.cover) === 'game' ? t('cups.cover.game') : t('cups.cover.upload')),
         h('div', { class: 'cups-img-actions' },
           h('button', { class: 'btn small', type: 'button', disabled: state.coverBusy != null, onclick: upload }, ic('upload'), t('cups.img.upload')),
+          canReadClipboard() ? h('button', { class: 'btn small', type: 'button', disabled: state.coverBusy != null, onclick: paste }, ic('paste'), t('cups.img.pasteShort')) : null,
           h('button', { class: 'btn small', type: 'button', onclick: pickGame }, ic('image'), t('cups.img.game')),
           auto ? null : h('button', { class: 'btn ghost small', type: 'button', onclick: () => { state.cover = null; onChange(); draw(); } }, t('cups.cover.reset')))),
     );
   }
   async function upload() {
     const [file] = await files.pick();
-    if (!file) return;
+    if (file) await uploadCover(file);
+  }
+  async function paste() {
+    const file = await readClipboardImage();
+    if (file) await uploadCover(file);
+  }
+  async function uploadCover(file) {
+    if (state.coverBusy != null) return;
     state.coverBusy = 0;
     draw();
     try {
@@ -924,8 +973,19 @@ function viewNew(ctx) {
 
   function drawRows(focusK) {
     const { bad } = tried ? validate() : { bad: new Set() };
+    // 이름 칸에 글을 쓰는 중이면 다시 그린 뒤에도 그 칸·커서를 그대로 둔다 (그림이 다 올라가 다시 그릴 때 등)
+    const act = document.activeElement;
+    const keep = !focusK && act?.classList.contains('cups-row-name') && list.contains(act)
+      ? { k: act.closest('[data-k]')?.dataset.k, from: act.selectionStart, to: act.selectionEnd } : null;
     list.replaceChildren(...st.items.map((r, i) => rowEl(r, i, bad)));
     if (focusK) list.querySelector(`[data-k="${focusK}"] .cups-row-name`)?.focus();
+    else if (keep?.k) {
+      const el = list.querySelector(`[data-k="${keep.k}"] .cups-row-name`);
+      if (el) {
+        el.focus({ preventScroll: true });
+        try { el.setSelectionRange(keep.from, keep.to); } catch { /* 없음 */ }
+      }
+    }
     drawCount();
   }
 
@@ -960,8 +1020,24 @@ function viewNew(ctx) {
     drawErrors();
   }
 
+  // 그림 붙여 넣기 (Ctrl+V): 이름 칸이면 그 항목에, 새 항목 칸이면 그림마다 새 항목.
+  // 클립보드에 글자와 그림이 같이 있으면 그림을 쓴다. 이름은 그대로 둔다 (붙여 넣은 그림은 보통 'image.png').
+  function pasteImages(e, row) {
+    const imgs = clipImages(e.clipboardData);
+    if (!imgs.length) return false;
+    e.preventDefault();
+    if (!row) { addImageRows(imgs, false); return true; }
+    if (!st.items.includes(row)) return true;
+    if (row.busy != null) { toast(t('cups.err.uploading')); return true; }
+    const [first, ...rest] = imgs;
+    uploadInto(row, first, false);
+    if (rest.length) addImageRows(rest, false);
+    return true;
+  }
+
   // 여러 줄 붙여 넣기 → 줄마다 항목
   function onPaste(e, row) {
+    if (pasteImages(e, row)) return;
     const text = e.clipboardData?.getData('text') || '';
     const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     if (lines.length < 2) return;
@@ -1038,11 +1114,17 @@ function viewNew(ctx) {
     list.children[Math.min(i, st.items.length - 1)]?.querySelector('.cups-row-name')?.focus();
   }
 
+  // 열린 그림 메뉴 { r, close } (메뉴가 열린 채 Ctrl+V 하면 그 항목에 넣는다)
+  let openMenu = null;
   function imageMenu(r, anchor) {
     let close = () => {};
     const item = (icName, label, fn, cls = '') => h('button', { type: 'button', class: `acct-menu-item ${cls}`, role: 'menuitem', onclick: () => { close(); fn(); } }, ic(icName), h('span', {}, label));
     const menu = h('div', { class: 'acct-menu cups-img-menu', role: 'menu' },
       item('upload', t('cups.img.upload'), async () => { const [file] = await files.pick(); if (file) uploadInto(r, file); }),
+      canReadClipboard() ? item('paste', t('cups.img.paste'), async () => {
+        const file = await readClipboardImage();
+        if (file && st.items.includes(r) && r.busy == null) uploadInto(r, file, false);
+      }) : null,
       item('image', t('cups.img.game'), async () => {
         const got = await pickGameImage(db);
         if (!got || !st.items.includes(r)) return;
@@ -1054,11 +1136,14 @@ function viewNew(ctx) {
       }),
       r.img ? item('close', t('cups.img.remove'), () => { r.img = null; drawRows(); changed(); cover.draw(); }, 'danger') : null,
     );
-    close = ctx.popover(anchor, menu);
+    const open = { r, close: () => close() };
+    openMenu = open;
+    close = ctx.popover(anchor, menu, () => { if (openMenu === open) openMenu = null; });
     menu.querySelector('button')?.focus();
   }
 
-  async function uploadInto(r, file) {
+  // named: 이름이 비어 있으면 파일 이름을 넣는다 (붙여 넣은 그림은 false)
+  async function uploadInto(r, file, named = true) {
     r.busy = 0;
     drawRows();
     changed();
@@ -1070,7 +1155,7 @@ function viewNew(ctx) {
     try {
       const ref = await uploadFile(file, setPct);
       r.img = ref;
-      if (!r.name.trim()) r.name = fileLabel(file);
+      if (named && !r.name.trim()) r.name = fileLabel(file);
     } catch (err) {
       toast(uploadErrorText(err));
     }
@@ -1081,25 +1166,49 @@ function viewNew(ctx) {
     cover.draw();
   }
 
-  // 사진 여러 장 → 사진마다 항목 하나 (이름은 파일 이름)
-  async function addFromImages() {
-    const picked = await files.pick({ multiple: true });
-    const room = LIMITS.items - filled().length;
+  // 사진 여러 장 → 사진마다 항목 하나 (빈 줄부터 채운다)
+  // named: 이름은 파일 이름 (기기에서 고른 사진) | false: 이름 없이 (붙여 넣은 그림, 첫 항목의 이름 칸으로 간다)
+  async function addImageRows(picked, named = true) {
+    if (!picked.length) return;
+    const blank = r => !r.name.trim() && !r.img && r.busy == null;
+    const room = LIMITS.items - st.items.filter(r => !blank(r)).length;
     if (room <= 0) { toast(t('cups.toast.full', { max: LIMITS.items })); return; }
     const use = picked.slice(0, room);
     if (picked.length > use.length) toast(t('cups.toast.capped', { n: picked.length - use.length, max: LIMITS.items }));
     const rows = use.map(f => {
-      const blank = st.items.find(r => !r.name.trim() && !r.img && r.busy == null);
-      if (blank) { blank.name = fileLabel(f); return blank; }
-      const r = newRow(fileLabel(f));
-      st.items.push(r);
+      const name = named ? fileLabel(f) : '';
+      let r = st.items.find(blank);
+      if (r) r.name = name;
+      else st.items.push(r = newRow(name));
+      r.busy = 0; // 차례를 기다리는 동안에도 '올리는 중' (빈 줄로 다시 잡히지 않게)
       return r;
     });
-    drawRows();
+    drawRows(named ? undefined : rows[0].k);
     changed();
     // 하나씩 차례로 올린다
-    for (let i = 0; i < rows.length; i++) await uploadInto(rows[i], use[i]);
+    for (let i = 0; i < rows.length; i++) {
+      if (st.items.includes(rows[i])) await uploadInto(rows[i], use[i], named);
+      else rows[i].busy = null;
+    }
   }
+  const addFromImages = async () => addImageRows(await files.pick({ multiple: true }));
+  const addFromClipboard = async () => { const file = await readClipboardImage(); if (file) addImageRows([file], false); };
+
+  // 편집 화면 어디서든 (글 칸이 아닌 곳) Ctrl+V 로 그림을 붙여 넣으면 새 항목. 화면을 떠나면 뗀다.
+  function onDocPaste(e) {
+    if (e.defaultPrevented || !form.isConnected) return;
+    const el = e.target instanceof Element ? e.target : null;
+    if (openMenu && el?.closest('.cups-img-menu')) { // 그림 메뉴가 열린 항목에
+      const { r, close } = openMenu;
+      if (pasteImages(e, r)) close();
+      return;
+    }
+    if (document.body.classList.contains('modal-open') || el?.closest('[role="dialog"]')) return; // 다른 창
+    if (isTextField(el)) return; // 제목·설명 등은 원래대로 (항목 칸은 저마다 onpaste 가 먼저 처리)
+    pasteImages(e, null);
+  }
+  document.addEventListener('paste', onDocPaste);
+  ctx.addCleanup(() => document.removeEventListener('paste', onDocPaste));
 
   // ---- 만들기
   const submitBtn = h('button', { class: 'btn primary cups-submit', type: 'submit' }, t('cups.new.submit'));
@@ -1166,7 +1275,8 @@ function viewNew(ctx) {
         h('button', { class: 'btn', type: 'button', onclick: addFromInput }, ic('plus'), t('cups.items.add'))),
       h('div', { class: 'cups-add-more' },
         h('button', { class: 'btn ghost small', type: 'button', onclick: addBlank }, ic('plus'), t('cups.items.addBlank')),
-        h('button', { class: 'btn ghost small', type: 'button', onclick: addFromImages }, ic('upload'), t('cups.items.addImages'))),
+        h('button', { class: 'btn ghost small', type: 'button', onclick: addFromImages }, ic('upload'), t('cups.items.addImages')),
+        canReadClipboard() ? h('button', { class: 'btn ghost small', type: 'button', onclick: addFromClipboard }, ic('paste'), t('cups.items.addPaste')) : null),
       h('p', { class: 'cups-help cups-paste-tip' }, t('cups.items.pasteTip')),
     ),
     h('section', { class: 'cups-panel' },
