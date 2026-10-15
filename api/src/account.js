@@ -1,8 +1,9 @@
 // 로그인·내 정보·티어표 동기화·갤러리·댓글·신고.
 // 처리하는 경로면 Response, 아니면 null 을 돌려준다.
 import { json, ipHashOf, rateLimited } from './http.js';
-import { getUser, verifyGoogleIdToken, keyResolverFor, createSession, deleteSession, bearerToken, publicUser, randomHex } from './auth.js';
+import { getUser, verifyGoogleIdToken, keyResolverFor, createSession, deleteSession, bearerToken, publicUser, randomHex, avatarOf, isFace, IMG_AVATAR } from './auth.js';
 import { isAnonVoter } from './votes.js';
+import { reportImage } from './moderation.js';
 
 const VOTE_NAMES = { 1: 'nerf', 2: 'fair', 3: 'buff' };
 const PAGE_SIZE = 20;
@@ -19,6 +20,7 @@ const TEMPLATE_RE = /^[a-z0-9][A-Za-z0-9.-]{0,79}$/;
 const ITEM_ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const ID_RE = /^[0-9a-f]{24}$/;      // 글·댓글 id (12바이트 hex)
 const USER_ID_RE = /^[0-9a-f]{32}$/;
+const IMAGE_ID_RE = /^[0-9a-f]{32}$/; // 올린 이미지 id (cups.js)
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 // 갤러리 글 종류. 'balance' 글은 밸런스 투표(너프/적당/버프 3줄, 색 고정)를 티어표와 같은 모양으로 담는다.
 const POST_KINDS = ['tier', 'balance'];
@@ -182,10 +184,6 @@ function initialName(payload) {
   return len(cut) >= 2 ? cut : `player-${randomHex(2)}`;
 }
 
-function cleanPicture(url) {
-  return typeof url === 'string' && url.length <= 500 && /^https:\/\/[^\s"'<>]+$/.test(url) ? url : null;
-}
-
 function parseState(text) {
   try { return JSON.parse(text); } catch { return null; }
 }
@@ -205,12 +203,12 @@ async function login(c) {
   const p = result.payload;
   const now = Date.now();
 
-  // 처음이면 만들고, 있으면 사진만 새로 (이름은 본인이 바꿨을 수 있어 그대로 둔다)
+  // 처음이면 만든다 (이름은 본인이 바꿨을 수 있어 그대로 둔다). 구글 사진은 쓰지 않으므로 예전에 저장한 것도 지운다.
   const row = await env.DB.prepare(
-    `INSERT INTO users (id, google_sub, name, picture, created) VALUES (?1, ?2, ?3, ?4, ?5)
-     ON CONFLICT (google_sub) DO UPDATE SET picture = excluded.picture
-     RETURNING id, google_sub, name, picture`
-  ).bind(randomHex(16), p.sub, initialName(p), cleanPicture(p.picture), now).first();
+    `INSERT INTO users (id, google_sub, name, created) VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT (google_sub) DO UPDATE SET picture = NULL
+     RETURNING id, google_sub, name, avatar`
+  ).bind(randomHex(16), p.sub, initialName(p), now).first();
 
   // 이 브라우저의 익명 표를 계정으로 옮긴다. 계정에 이미 있는 항목은 계정 표를 남긴다.
   if (isAnonVoter(body.voter)) {
@@ -249,10 +247,27 @@ async function patchMe(c) {
   if (await limited(c, 'profile')) return c.send({ error: 'rate_limited' }, 429);
   const { body, res } = await readBody(c, SMALL_BODY_BYTES);
   if (res) return res;
-  const name = cleanName(body.name);
-  if (!name) return bad(c, 'name');
-  await c.env.DB.prepare('UPDATE users SET name = ?1 WHERE id = ?2').bind(name, c.user.id).run();
-  return c.send({ user: { ...c.user, name } });
+  // name, avatar 중 보낸 것만 바꾼다. avatar: 'face:<캐릭터>' | 'img:<내가 올린 이미지>' | null(기본 얼굴)
+  const user = { ...c.user };
+  const stmts = [];
+  if (body.name !== undefined || body.avatar === undefined) {
+    const name = cleanName(body.name);
+    if (!name) return bad(c, 'name');
+    user.name = name;
+    stmts.push(c.env.DB.prepare('UPDATE users SET name = ?1 WHERE id = ?2').bind(name, user.id));
+  }
+  if (body.avatar !== undefined) {
+    const avatar = body.avatar;
+    if (avatar !== null && !isFace(avatar)) {
+      if (typeof avatar !== 'string' || !IMG_AVATAR.test(avatar)) return bad(c, 'avatar');
+      const own = await c.env.DB.prepare(`SELECT 1 FROM images WHERE id = ?1 AND user_id = ?2 AND status IN ('ok', 'pending')`).bind(avatar.slice(4), user.id).first();
+      if (!own) return bad(c, 'avatar');
+    }
+    user.avatar = avatarOf(avatar, user.id);
+    stmts.push(c.env.DB.prepare('UPDATE users SET avatar = ?1 WHERE id = ?2').bind(avatar, user.id));
+  }
+  await c.env.DB.batch(stmts);
+  return c.send({ user });
 }
 
 async function putTier(c, template) {
@@ -287,7 +302,7 @@ async function deleteTier(c, template) {
 // ---------- 갤러리 ----------
 
 const POST_COLUMNS = `p.id, p.user_id, p.kind, p.template, p.title, p.state, p.created, p.likes, p.dislikes, p.comments, p.hidden,
-  u.name AS a_name, u.picture AS a_picture`;
+  u.name AS a_name, u.avatar AS a_avatar`;
 
 function postOut(r) {
   return {
@@ -296,7 +311,7 @@ function postOut(r) {
     template: r.template,
     title: r.title,
     state: parseState(r.state),
-    author: { id: r.user_id, name: r.a_name, picture: r.a_picture || null },
+    author: { id: r.user_id, name: r.a_name, avatar: avatarOf(r.a_avatar, r.user_id) },
     created: r.created,
     likes: r.likes,
     dislikes: r.dislikes,
@@ -347,7 +362,7 @@ async function createPost(c) {
   ).bind(id, user.id, kind, body.template, title, JSON.stringify(state), now).run();
   return c.send({
     post: {
-      id, kind, template: body.template, title, state, author: { id: user.id, name: user.name, picture: user.picture },
+      id, kind, template: body.template, title, state, author: { id: user.id, name: user.name, avatar: user.avatar },
       created: now, likes: 0, dislikes: 0, comments: 0, myReaction: 0, hidden: false,
     },
   });
@@ -470,7 +485,7 @@ function commentOut(r, user) {
   return {
     id: r.id,
     body: r.body,
-    author: { id: r.user_id, name: r.a_name, picture: r.a_picture || null },
+    author: { id: r.user_id, name: r.a_name, avatar: avatarOf(r.a_avatar, r.user_id) },
     created: r.created,
     likes: r.likes,
     myLike: Boolean(r.my_like),
@@ -485,7 +500,7 @@ export async function listComments(c, target, { item = null, order }) {
   const me = c.user?.id ?? '';
   const visible = c.user?.admin ? '' : 'AND (c.hidden = 0 OR c.user_id = ?3)';
   const { results } = await c.env.DB.prepare(
-    `SELECT c.id, c.body, c.user_id, c.created, c.likes, c.hidden, u.name AS a_name, u.picture AS a_picture,
+    `SELECT c.id, c.body, c.user_id, c.created, c.likes, c.hidden, u.name AS a_name, u.avatar AS a_avatar,
        EXISTS (SELECT 1 FROM comment_likes l WHERE l.comment_id = c.id AND l.user_id = ?3) AS my_like,
        ${item ? 'bv.v' : 'NULL'} AS vote
      FROM comments c JOIN users u ON u.id = c.user_id
@@ -519,7 +534,7 @@ export async function addComment(c, target, item = null) {
     const row = await env.DB.prepare('SELECT v FROM balance_votes WHERE item = ?1 AND voter = ?2').bind(item, `u_${user.id}`).first();
     vote = row?.v ?? null;
   }
-  const row = { id, body: text, user_id: user.id, a_name: user.name, a_picture: user.picture, created: now, likes: 0, my_like: 0, vote, hidden: 0 };
+  const row = { id, body: text, user_id: user.id, a_name: user.name, a_avatar: user.avatar, created: now, likes: 0, my_like: 0, vote, hidden: 0 };
   return c.send({ comment: commentOut(row, user) });
 }
 
@@ -595,7 +610,8 @@ async function likeComment(c, id) {
 // ---------- 신고 ----------
 
 // 신고할 수 있는 것과 그 표. 'cup' 은 사용자 월드컵 (cups.js, 0005).
-const REPORT_TABLES = { post: 'posts', comment: 'comments', cup: 'cups' };
+// 'image' 는 올린 이미지 (id 32자리 hex) — 3명이 신고하면 images.status = 'hidden' (moderation.js).
+const REPORT_TABLES = { post: 'posts', comment: 'comments', cup: 'cups', image: 'images' };
 
 async function findCupRow(c, id) {
   const row = await c.env.DB.prepare('SELECT id, user_id, hidden FROM cups WHERE id = ?1').bind(id).first();
@@ -609,11 +625,16 @@ async function report(c) {
   if (res) return res;
   const { kind, id } = body;
   if (!Object.hasOwn(REPORT_TABLES, kind)) return bad(c, 'kind');
-  if (typeof id !== 'string' || !ID_RE.test(id)) return bad(c, 'id');
+  if (typeof id !== 'string' || !(kind === 'image' ? IMAGE_ID_RE : ID_RE).test(id)) return bad(c, 'id');
   let reason = null;
   if (body.reason !== undefined && body.reason !== null && body.reason !== '') {
     reason = typeof body.reason === 'string' ? body.reason.replace(UNSAFE_CHARS, '').trim() : '';
     if (!reason || len(reason) > 200) return bad(c, 'reason');
+  }
+
+  if (kind === 'image') {
+    const r = await reportImage(env, { id, userId: user.id, reason, origin: c.url.origin });
+    return r.error ? notFound(c) : c.send({ ok: true });
   }
 
   const row = kind === 'post' ? await findPost(c, id) : kind === 'cup' ? await findCupRow(c, id) : await findComment(c, id);

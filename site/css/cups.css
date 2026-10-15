@@ -316,6 +316,14 @@ textarea.cups-input { resize: vertical; min-height: 76px; }
 .cups-rank-row { cursor: default; }
 .cups-rank-row:hover { border-color: rgba(255, 255, 255, .07); }
 .cups-rank-empty { padding: 40px 0; }
+/* 올린 이미지 신고 (순위 줄 안, 작게) */
+.cups-img-report {
+  justify-self: start; display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.cups-img-report .ic { width: 13px; height: 13px; }
+.cups-img-report:hover, .cups-img-report:focus-visible { color: #ffb4b0; background: rgba(229, 72, 77, .1); }
 
 /* ---------------------------------------------------------------- 좁은 화면 */
 @media (max-width: 760px) {

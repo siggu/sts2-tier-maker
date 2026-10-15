@@ -5,17 +5,19 @@ import {
   validatePlay, playError, tallyMatches, imageTypeOf, IMAGE_TYPES, imageId, MAX_IMAGE_BYTES,
 } from '../src/cups.js';
 import { handleAccount } from '../src/account.js';
+import { avatarOf } from '../src/auth.js';
 import { corsHeaders } from '../src/http.js';
 import { makeTestKey, googlePayload, makeD1, playBracket } from './helpers.js';
+import * as fixture from './images.js';
 
 const keys = new Set(['cards/bash', 'cards/strike', 'relics/anchor']);
 const HEX = 'a'.repeat(32);
 const voter = 'abcdef0123456789';
 
-// 시험용 이미지: 매직 바이트 + 아무 내용
-const png = (seed = 0) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, seed]);
-const jpeg = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
-const webp = () => new Uint8Array([...'RIFF'].map(c => c.charCodeAt(0)).concat([4, 0, 0, 0], [...'WEBPVP8 '].map(c => c.charCodeAt(0))));
+// 시험용 이미지 (images.js: 조각 구조가 맞는 작은 파일)
+const png = (seed = 0) => fixture.png({ seed });
+const jpeg = () => fixture.jpeg();
+const webp = () => fixture.webp();
 
 // 이긴 쪽 = 짝의 앞쪽(혹은 pick 이 고른 쪽)으로 한 판을 치른 경기 목록
 function bracket(entrants, pick = (a) => a) {
@@ -209,10 +211,11 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   let r = await call('POST', '/images', { token: A, raw: png(), type: 'image/png' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const pngId = r.data.id;
-  assert.deepEqual(r.data, { id: pngId, ref: `img:${pngId}` });
+  // env.AI 가 없으면 검토 대기(pending)로 저장된다 (moderation.test.js)
+  assert.deepEqual(r.data, { id: pngId, ref: `img:${pngId}`, status: 'pending' });
   assert.equal(pngId, await imageId(png()));
   // 같은 파일은 같은 id (다른 사람이 올려도)
-  assert.deepEqual((await call('POST', '/images', { token: B, raw: png(), type: 'image/png' })).data, { id: pngId, ref: `img:${pngId}` });
+  assert.deepEqual((await call('POST', '/images', { token: B, raw: png(), type: 'image/png' })).data, { id: pngId, ref: `img:${pngId}`, status: 'pending' });
   assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM images').get().n, 1);
   const webpRef = (await call('POST', '/images', { token: A, raw: webp(), type: 'image/webp' })).data.ref;
   assert.deepEqual((await call('POST', '/images', { token: A, raw: png(), type: 'text/html' })).data, { error: 'bad_request', reason: 'type' });
@@ -221,8 +224,8 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   const huge = new Uint8Array(MAX_IMAGE_BYTES + 1);
   huge.set(jpeg());
   assert.equal((await call('POST', '/images', { token: A, raw: huge, type: 'image/jpeg' })).status, 413);
-  const edge = new Uint8Array(MAX_IMAGE_BYTES);
-  edge.set(jpeg());
+  const edge = fixture.jpeg({ scan: Array(MAX_IMAGE_BYTES - fixture.jpeg({ scan: [] }).length).fill(0x11) });
+  assert.equal(edge.length, MAX_IMAGE_BYTES);
   r = await call('POST', '/images', { token: A, raw: edge, type: 'image/jpeg' });
   assert.equal(r.status, 200);
   const jpegRef = r.data.ref;
@@ -238,7 +241,7 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('Content-Type'), 'image/png');
   assert.equal(res.headers.get('Access-Control-Allow-Origin'), '*');
-  assert.equal(res.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  assert.equal(res.headers.get('Cache-Control'), 'public, max-age=86400');
   assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff');
   assert.equal(res.headers.get('Content-Security-Policy'), "default-src 'none'");
   assert.equal(res.headers.get('Vary'), null);
@@ -275,7 +278,7 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   assert.match(cup.id, /^[0-9a-f]{24}$/);
   assert.deepEqual({ ...cup, id: 0, created: 0 }, {
     id: 0, title: '최애 월드컵', description: '설명\n둘째 줄', cover: jpegRef, itemCount: 8, plays: 0, likes: 0, comments: 0,
-    author: { id: alice.user.id, name: 'Alice', picture: 'https://example.com/a.png' }, created: 0,
+    author: { id: alice.user.id, name: 'Alice', avatar: avatarOf(null, alice.user.id) }, created: 0,
     sample: [`img:${pngId}`, 'game:cards/bash', webpRef, 'game:relics/anchor'], myLike: false, hidden: false, mine: true,
   });
 
@@ -379,7 +382,7 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   assert.equal((await call('POST', `/cups/${cup.id}/comments`, { token: B, body: { body: ' ' } })).data.reason, 'body');
   const c1 = (await call('POST', `/cups/${cup.id}/comments`, { token: B, body: { body: '재밌다' } })).data.comment;
   assert.deepEqual({ ...c1, id: 0, created: 0 }, {
-    id: 0, body: '재밌다', author: { id: bob.user.id, name: 'Bob', picture: 'https://example.com/a.png' }, created: 0,
+    id: 0, body: '재밌다', author: { id: bob.user.id, name: 'Bob', avatar: avatarOf(null, bob.user.id) }, created: 0,
     likes: 0, myLike: false, mine: true, vote: null, hidden: false,
   });
   const c2 = (await call('POST', `/cups/${cup.id}/comments`, { token: A, body: { body: '고마워요' } })).data.comment;

@@ -5,6 +5,7 @@ import { getUser } from './auth.js';
 import { handleAccount } from './account.js';
 import { handlePlay } from './play.js';
 import { handleCups } from './cups.js';
+import { handleAdmin } from './admin.js';
 
 const MAX_VOTERS_PER_IP_ITEM = 3; // 같은 IP 에서 한 아이템에 표를 무한히 늘리지 못하게
 const RATE_PER_MINUTE = 30;
@@ -19,13 +20,16 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     try {
+      if (await overFrontLimit(request, env, url)) return json({ error: 'rate_limited' }, 429, { ...cors, 'Retry-After': '60' });
       if (url.pathname === '/health') return json({ ok: true, items: validKeys.size }, 200, cors);
       if (url.pathname === '/balance' && request.method === 'POST') return await postVotes(request, env, ctx, cors);
       if (url.pathname === '/balance' && request.method === 'GET') return await getResults(url, env, ctx, cors);
-      // 로그인·동기화·갤러리·댓글 (account.js), 모두의 티어표·A vs B (play.js). 처리하지 않으면 null.
+      // 로그인·동기화·갤러리·댓글 (account.js), 모두의 티어표·A vs B (play.js), 사용자 월드컵 (cups.js),
+      // 이미지 검토 (admin.js). 처리하지 않으면 null.
       const res = (await handleAccount(request, env, ctx, { url, cors, keys: validKeys }))
         ?? (await handlePlay(request, env, ctx, { url, cors, keys: validKeys }))
-        ?? (await handleCups(request, env, ctx, { url, cors, keys: validKeys }));
+        ?? (await handleCups(request, env, ctx, { url, cors, keys: validKeys }))
+        ?? (await handleAdmin(request, env, ctx, { url, cors }));
       if (res) return res;
       return json({ error: 'not_found' }, 404, cors);
     } catch (err) {
@@ -34,6 +38,22 @@ export default {
     }
   },
 };
+
+// 맨 앞 IP 당 요청 수 제한: Cloudflare 요청 제한 바인딩(wrangler.toml [[ratelimits]]) — D1 을 쓰지 않으므로
+// 마구 보내는 요청이 D1 쓰기 한도를 먹지 못한다. 기능별 세부 제한(rateLimited)은 이 뒤에 따로 있다.
+// 이미지(/img/)는 한 화면에 여러 장이라 따로 넉넉하게 센다. 바인딩이 없으면(시험) 건너뛴다.
+async function overFrontLimit(request, env, url) {
+  if (url.pathname === '/health') return false;
+  const limiter = url.pathname.startsWith('/img/') ? env.IMG_LIMITER : env.API_LIMITER;
+  if (!limiter) return false;
+  try {
+    const { success } = await limiter.limit({ key: request.headers.get('CF-Connecting-IP') || 'unknown' });
+    return !success;
+  } catch (err) {
+    console.warn('limiter', err?.message || err);
+    return false;
+  }
+}
 
 async function postVotes(request, env, ctx, cors) {
   let body;

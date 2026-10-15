@@ -1,5 +1,5 @@
 // 구글 로그인(ID 토큰 검증)과 세션.
-// getUser(request, env) → { id, name, picture, admin } | null   (Authorization: Bearer <세션 토큰>)
+// getUser(request, env) → { id, name, avatar, admin } | null   (Authorization: Bearer <세션 토큰>)
 import { sha256 } from './http.js';
 
 const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
@@ -121,13 +121,32 @@ export async function verifyGoogleIdToken(token, { clientId, getKey, now = Date.
   return { ok: true, payload };
 }
 
-export function isAdmin(env, googleSub) {
-  return (env.ADMIN_SUBS || '').split(',').map(s => s.trim()).filter(Boolean).includes(googleSub);
+const listOf = v => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+
+// 관리자: 구글 sub 이 ADMIN_SUBS 에 있거나, 사용자 id(users.id)가 ADMIN_USERS 에 있으면
+export function isAdmin(env, googleSub, userId = null) {
+  return listOf(env.ADMIN_SUBS).includes(googleSub) || (userId !== null && listOf(env.ADMIN_USERS).includes(userId));
+}
+
+// 프로필 사진: 'face:<캐릭터>' (기본 얼굴) | 'img:<32hex>' (올린 사진).
+// 고르지 않았으면(NULL) 사용자 id 로 정한 얼굴 하나. site/js/community.js 의 avatarRef 와 같은 계산.
+export const FACES = ['ironclad', 'silent', 'regent', 'necrobinder', 'defect'];
+export const IMG_AVATAR = /^img:[0-9a-f]{32}$/;
+
+export function isFace(value) {
+  return typeof value === 'string' && value.startsWith('face:') && FACES.includes(value.slice(5));
+}
+
+export function avatarOf(value, userId) {
+  if (isFace(value) || (typeof value === 'string' && IMG_AVATAR.test(value))) return value;
+  let n = 0;
+  for (const ch of String(userId)) n = (n * 31 + ch.charCodeAt(0)) % 9973;
+  return `face:${FACES[n % FACES.length]}`;
 }
 
 // users 행 → 밖으로 내보내는 user
 export function publicUser(row, env) {
-  return { id: row.id, name: row.name, picture: row.picture || null, admin: isAdmin(env, row.google_sub) };
+  return { id: row.id, name: row.name, avatar: avatarOf(row.avatar, row.id), admin: isAdmin(env, row.google_sub, row.id) };
 }
 
 export function bearerToken(request) {
@@ -159,7 +178,7 @@ async function lookupUser(request, env) {
   const token = bearerToken(request);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.google_sub, u.name, u.picture FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.google_sub, u.name, u.avatar FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ?1 AND s.expires > ?2`
   ).bind(await sha256(token), Date.now()).first();
   return row ? publicUser(row, env) : null;

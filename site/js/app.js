@@ -14,6 +14,7 @@ import * as community from './community.js';
 import { currentUser } from './auth.js';
 import * as play from './play.js';
 import * as cups from './cups.js';
+import * as admin from './admin.js';
 
 const app = document.getElementById('app');
 let db = null;
@@ -45,7 +46,7 @@ function route() {
   setNav(parts[0] === 'balance' ? 'balance' : 'tier', parts);
 
   // 기능 모듈이 먼저 자기 주소(#/gallery, #/versus 등)를 처리한다.
-  if (community.route(parts, params, ctx) || play.route(parts, params, ctx) || cups.route(parts, params, ctx)) return;
+  if (community.route(parts, params, ctx) || play.route(parts, params, ctx) || cups.route(parts, params, ctx) || admin.route(parts, params, ctx)) return;
 
   if (parts[0] === 'tier' && parts[1]) return viewTier(parts[1], params.get('s'));
   if (parts[0] === 'c' && parts[1]) return viewCategory('tier', parts[1]);
@@ -477,16 +478,30 @@ async function share(template, state) {
 function popover(anchor, content, onClose) {
   const el = h('div', { class: 'popover', role: 'dialog' }, content);
   document.body.append(el);
-  const r = anchor.getBoundingClientRect();
-  const w = el.offsetWidth;
-  el.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + scrollX))}px`;
-  el.style.top = `${r.bottom + scrollY + 6}px`;
+  // innerWidth 는 세로 스크롤바까지 포함하므로 실제로 보이는 폭(clientWidth, 화면 확대 시 visualViewport)에 맞춘다.
+  const place = () => {
+    const vv = window.visualViewport;
+    const viewW = Math.min(document.documentElement.clientWidth, vv ? vv.width : Infinity);
+    const viewX = vv ? vv.offsetLeft : 0;
+    el.style.maxWidth = `${viewW - 16}px`;
+    const r = anchor.getBoundingClientRect();
+    const w = el.offsetWidth;
+    // 화면 오른쪽 절반에 있는 버튼이면 오른쪽 끝을 맞춘다.
+    const want = r.left + r.width / 2 > viewX + viewW / 2 ? r.right - w : r.left;
+    el.style.left = `${Math.max(viewX + 8, Math.min(viewX + viewW - w - 8, want)) + scrollX}px`;
+    el.style.top = `${r.bottom + scrollY + 6}px`;
+  };
+  place();
+  addEventListener('resize', place);
+  window.visualViewport?.addEventListener('resize', place);
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
     onClose?.();
     el.remove();
+    removeEventListener('resize', place);
+    window.visualViewport?.removeEventListener('resize', place);
     document.removeEventListener('pointerdown', outside, true);
     document.removeEventListener('keydown', esc);
   };
