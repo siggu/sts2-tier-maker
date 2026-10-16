@@ -9,7 +9,7 @@ import { lang, t, has, collator } from './i18n.js';
 //     { id, name, tile: 'card' | 'icon' | 'portrait' | 'creature',
 //       groups?: [{ id, name, color }],
 //       split?: { by: ['rarity', 'type'], groupFirst?: bool, sharedGroup?: id },
-//       items: [{ id, name, img, group?, rarity?, type?, cost?, text? }] }
+//       items: [{ id, name, img, group?, rarity?, type?, cost?, text?, hidden? }] }
 //   ]
 // }
 
@@ -69,7 +69,9 @@ function buildIndex(raw, tr) {
     const groups = (cat.groups || []).map(g => ({ ...g, name: groupNames[g.id] || g.name }));
     const groupName = new Map(groups.map(g => [g.id, g.name]));
     const labels = tr?.labels?.[cat.id] || cat.labels;
+    // hidden: 게임 언어 파일에 아직 이름이 없는 항목 (tools/fetch-data.mjs). 사이트 어디에도 내보이지 않는다.
     const items = cat.items
+      .filter(i => !i.hidden)
       .map(i => ({ ...translateItem(i, tr?.items?.[`${cat.id}/${i.id}`]), key: `${cat.id}/${i.id}`, groupName: groupName.get(i.group) }))
       .sort((a, b) => collator.compare(a.name, b.name));
     const name = has(`cat.${cat.id}`) ? t(`cat.${cat.id}`) : cat.name;

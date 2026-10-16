@@ -25,6 +25,8 @@ function placeholders(tmpl) {
 
 // "Name:fmt:args" 를 나눈다. args 는 '|' 로 나뉘지만 중첩된 {} 안의 '|' 는 무시한다.
 function parsePlaceholder(body) {
+  // {singleStarIcon} 은 별 아이콘 하나 ("Gain {Stars:diff()} {singleStarIcon}" → "Gain 9 ★")
+  if (body === 'singleStarIcon') return { name: body, fmt: 'starIcons(1)', args: [] };
   const first = body.indexOf(':');
   if (first === -1) return { name: body, fmt: '', args: [] };
   const name = body.slice(0, first);
@@ -67,7 +69,7 @@ const stripTags = s => s.replace(/\[\/?[a-z_]+(?:=[^\]]*)?\]/g, '');
 
 // 위키 문구 정리: $키워드 표시, <br>, 위키 틀 제거, 공백 하나로
 // {{QueryLink|Cards|type:Attack|Attacks|2}} → Attacks, {{P|Potion-Shaped Rock||2}} → Potion-Shaped Rock
-function wikiTemplate(_, body) {
+export function wikiTemplate(_, body) {
   const [name, ...args] = body.split('|');
   if (name.trim() === '2' && args[0]) return args[0].trim();
   const shown = args.filter(a => a.trim() && !/^\d+$/.test(a.trim()) && !a.includes(':'));
@@ -230,6 +232,30 @@ export function alignValues(enTmpl, wikiRaw) {
   return values;
 }
 
+// alignValues 가 맞지 않을 때(위키와 게임의 문장이 조금 다를 때)의 대안: 틀의 값 자리와 위키의 수치를 차례대로 짝짓는다.
+// 틀에 적힌 고정 숫자([blue]1[/blue] 등)는 위키 쪽에서 하나씩 지운 뒤, 남은 수치 개수가 값 자리 수와 같을 때만 쓴다.
+export function looseValues(enTmpl, wikiRaw) {
+  if (!enTmpl || !wikiRaw) return null;
+  const names = [];
+  const walk = t => {
+    for (const ph of placeholders(t)) {
+      const { name, fmt, args } = parsePlaceholder(ph.body);
+      if (isConditional(name)) { const c = parseConditional(ph.body); walk(c.off); continue; }
+      if (fmt === 'plural' || fmt === 'cond' || fmt.startsWith('choose') || fmt === 'show') { if (name && !names.includes(name) && args.some(a => /\{\}|\{:/.test(a))) names.push(name); continue; }
+      if (/^(energyIcons|starIcons)\(\d+\)/.test(fmt) || !name || /^Calculat/.test(name)) continue;
+      if (!names.includes(name)) names.push(name);
+    }
+  };
+  const t = stripTags(enTmpl);
+  walk(t);
+  const toks = (normalizeWiki(wikiRaw).match(new RegExp(VALUE.replace(/\|X\|Energy\)$/, ')'), 'g')) || []).map(s => s.trim());
+  const literal = stripTags(enTmpl).replace(/\{[^{}]*\}/g, ' ').match(/\d+/g) || [];
+  for (const n of literal) { const i = toks.indexOf(n); if (i >= 0) toks.splice(i, 1); }
+  if (!names.length) return {}; // 값 자리가 없는 틀은 그대로 쓴다
+  if (toks.length !== names.length) return null;
+  return Object.fromEntries(names.map((name, i) => { const v = readToken(toks[i]); return [name, { base: v.base, up: v.up }]; }));
+}
+
 // 선택지에 따라 문구가 갈리는 틀을 한 가지로 고정한다. choices 에 없는 자리표시자는 그대로 둔다.
 //   specialize('{CardType:choose(Attack|Skill):A|B|?}{Chaos:C|}', { CardType: 'Skill', Chaos: true }) → 'BC'
 export function specialize(tmpl, choices) {
@@ -256,40 +282,63 @@ export function specialize(tmpl, choices) {
   return out + tmpl.slice(last);
 }
 
+const compare = (n, op, k) => ({ '>': n > k, '>=': n >= k, '<': n < k, '<=': n <= k, '!=': n !== k, '!': n !== k })[op] ?? n === k;
+
 // 한국어 틀에 값을 채워 HTML 로. upgraded 면 강화 후 값, highlight 면 강화로 바뀐 값을 강조.
 // words: 영어 이름 → 한국어 이름 (단어 값을 옮길 때 쓴다)
 export function renderKo(koTmpl, values, { upgraded = false, highlight = false, words = {} } = {}) {
   const icon = (n, kind) => {
     const ch = kind === 'ST' ? '★' : '⚡';
     const cls = kind === 'ST' ? 'star' : 'energy';
-    return `<i class="ic ${cls}">${ch.repeat(Math.max(1, Number(n) || 1))}</i>`;
+    // 게임처럼 셋까지는 아이콘을 늘어놓고, 넷부터는 "4⚡" 처럼 숫자와 아이콘 하나
+    const k = Math.max(1, Number(n) || 1);
+    return k >= 4 ? `${k}<i class="ic ${cls}">${ch}</i>` : `<i class="ic ${cls}">${ch.repeat(k)}</i>`;
   };
 
-  function render(tmpl) {
+  // own: 단·복수·선택 문구 안의 {} · {:diff()} 가 가리키는 변수 이름
+  function render(tmpl, own = null) {
     let out = '';
     let last = 0;
     for (const ph of placeholders(tmpl)) {
       out += escapeHtml(tmpl.slice(last, ph.start));
       last = ph.end;
-      const { name, fmt, args } = parsePlaceholder(ph.body);
-      if (fmt === 'cond') { out += render(args[1] ?? ''); continue; } // 값이 정해지지 않은 상태(획득 전)의 문구
+      const parsed = parsePlaceholder(ph.body);
+      const { fmt, args } = parsed;
+      const name = parsed.name === '' && own ? own : parsed.name;
+      const v = values[name];
+      const n = v ? Number(upgraded ? v.up.n : v.base.n) : NaN;
+      if (fmt === 'cond') {
+        // {Attacks:cond:>1?{Attacks:diff()} Attacks are|Attack is}. 값을 모르면(획득 전 등) 뒤 문구
+        const m = (args[0] ?? '').match(/^([<>=!]*)(-?\d+(?:\.\d+)?)\?([\s\S]*)$/);
+        out += render(m && !Number.isNaN(n) && compare(n, m[1], Number(m[2])) ? m[3] : args[1] ?? '', name);
+        continue;
+      }
       if (isConditional(name)) {
         const c = parseConditional(ph.body);
-        if (c.name !== 'IfUpgraded') { out += render(c.off); continue; } // 전투 중 계산값 등은 카드 설명에서 뺀다
+        if (c.name !== 'IfUpgraded') { out += render(c.off, own); continue; } // 전투 중 계산값 등은 카드 설명에서 뺀다
         const chosen = upgraded ? c.on : c.off;
-        out += highlight && upgraded && c.on !== c.off ? `<span class="up">${render(chosen)}</span>` : render(chosen);
+        out += highlight && upgraded && c.on !== c.off ? `<span class="up">${render(chosen, own)}</span>` : render(chosen, own);
         continue;
       }
-      const v = values[name];
       if (fmt === 'plural') {
-        const n = Number(v ? (upgraded ? v.up.n : v.base.n) : 1);
-        out += render(n === 1 ? (args[0] ?? '') : (args[1] ?? args[0] ?? ''));
+        const k = !v ? 1 : Number.isNaN(n) ? 2 : n; // X 같은 글자 값은 복수
+        out += render(k === 1 ? (args[0] ?? '') : (args[1] ?? args[0] ?? ''), name);
         continue;
       }
-      if (fmt.startsWith('choose')) { out += render(args[0] ?? ''); continue; }
+      if (fmt.startsWith('choose')) {
+        // {Turns:choose(1):턴|{}턴}: 값이 목록의 몇 번째인지로 고르고, 없으면 마지막(그 밖) 문구. 값을 모르면 첫 문구
+        const opts = fmt.match(/^choose\((.*)\)$/)?.[1].split('|') || [];
+        let pick = args[0] ?? '';
+        if (v) {
+          const i = opts.findIndex(o => o === String(upgraded ? v.up.n : v.base.n) || (o !== '' && Number(o) === n));
+          pick = args[i === -1 ? opts.length : i] ?? args[args.length - 1] ?? '';
+        }
+        out += render(pick, name);
+        continue;
+      }
       // 개수가 정해진 아이콘은 값이 없어도 그린다
       const fixedIcons = fmt.match(/^(energy|star)Icons\((\d+)\)/);
-      if (fixedIcons && !v) { out += icon(fixedIcons[2], fixedIcons[1] === 'star' ? 'ST' : 'IE'); continue; }
+      if (fixedIcons && (!v || name === 'singleStarIcon')) { out += icon(fixedIcons[2], fixedIcons[1] === 'star' ? 'ST' : 'IE'); continue; }
       if (!v) throw new Error(`값 없음: ${name}`);
       const cur = upgraded ? v.up : v.base;
       let text;

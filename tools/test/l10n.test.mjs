@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alignValues, normalizeWiki, renderKo, renderKoBoth, specialize, splitKeywords, withKeywords } from '../l10n.mjs';
+import { alignValues, looseValues, normalizeWiki, renderKo, renderKoBoth, specialize, splitKeywords, withKeywords } from '../l10n.mjs';
 
 const strip = s => s.replace(/<[^>]+>/g, '');
 
@@ -25,7 +25,35 @@ test('에너지 아이콘 개수', () => {
   const v = alignValues('Gain {Energy:energyIcons()}.', 'Gain [@IE@IE@IE|4 @IE].');
   assert.equal(v.Energy.base.n, 3);
   assert.equal(v.Energy.up.n, '4');
-  assert.equal(strip(renderKo('{Energy:energyIcons()}를 얻습니다.', v, { upgraded: true })), '⚡⚡⚡⚡를 얻습니다.');
+  // 넷부터는 게임·위키처럼 숫자와 아이콘 하나
+  assert.equal(strip(renderKo('{Energy:energyIcons()}를 얻습니다.', v, { upgraded: true })), '4⚡를 얻습니다.');
+  assert.equal(strip(renderKo('{Energy:energyIcons()}를 얻습니다.', v)), '⚡⚡⚡를 얻습니다.');
+});
+
+test('{singleStarIcon} 은 별 아이콘이고 값으로 읽지 않는다', () => {
+  const v = alignValues('Gain {Stars:diff()} {singleStarIcon}.', 'Gain 9 @ST.');
+  assert.equal(Number(v.Stars.base.n), 9);
+  assert.equal(strip(renderKo('{singleStarIcon}을 {Stars:diff()} 얻습니다.', v)), '★을 9 얻습니다.');
+  const m = alignValues('The first time you spend {singleStarIcon} each turn, gain [blue]{StrengthPower}[/blue] [gold]Strength[/gold].', 'The first time you spend @ST each turn, gain 1 $Strength.');
+  assert.equal(strip(renderKo('매 턴마다 처음으로 {singleStarIcon}을 소모 시, [gold]힘[/gold]을 [blue]{StrengthPower}[/blue] 얻습니다.', m)), '매 턴마다 처음으로 ★을 소모 시, 힘을 1 얻습니다.');
+});
+
+test('choose(1)·cond·plural 은 값에 따라 문구를 고르고, 안의 {} 는 그 값', () => {
+  const v = alignValues('At the start of the next {Combats:plural:combat|[blue]{}[/blue] combats}, gain [blue]{StrengthPower}[/blue] [gold]Strength[/gold].', 'At the start of the next 5 combats, gain 2 $Strength.');
+  assert.equal(strip(renderKo('{Combats:choose(1):다음|다음 [blue]{}[/blue]번의} 전투 시작 시, [gold]힘[/gold]을 [blue]{StrengthPower}[/blue] 얻습니다.', v)), '다음 5번의 전투 시작 시, 힘을 2 얻습니다.');
+  assert.equal(strip(renderKo('next {Combats:plural:combat|{} combats}', v)), 'next 5 combats');
+  const one = { Combats: { base: { n: '1' }, up: { n: '1' } } };
+  assert.equal(strip(renderKo('{Combats:choose(1):다음|다음 {}번의} 전투', one)), '다음 전투');
+  const p = alignValues('your next {Attacks:cond:>1?{Attacks:diff()} Attacks are|Attack is} played', 'your next [Attack is|2 Attacks are] played');
+  const ko = '다음에 사용하는 {Attacks:cond:>1?공격 카드 {Attacks:diff()}장이|공격 카드가} 사용됩니다';
+  assert.equal(strip(renderKo(ko, p)), '다음에 사용하는 공격 카드가 사용됩니다');
+  assert.equal(strip(renderKo(ko, p, { upgraded: true })), '다음에 사용하는 공격 카드 2장이 사용됩니다');
+});
+
+test('문장이 조금 다르면 수치를 차례대로 짝짓는다 (틀의 고정 숫자는 뺀다)', () => {
+  const v = looseValues('Upon pickup, choose [blue]1[/blue] of [blue]{Cards}[/blue] Rare cards to add to your [gold]Deck[/gold], and add [blue]1[/blue] [red]Injury[/red] to your [gold]Deck[/gold].', 'Choose 1 of 3 Rare cards to add to your Deck. Add 1 {{C2|Injury}} to your Deck.');
+  assert.equal(v.Cards.base.n, '3');
+  assert.equal(looseValues('Deal {Damage:diff()} damage. Draw {Cards:diff()} cards.', 'Deal 5 damage.'), null);
 });
 
 test('위키 틀과 키워드 줄을 걸러 낸다', () => {
