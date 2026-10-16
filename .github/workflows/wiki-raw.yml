@@ -5,18 +5,25 @@ on:
 permissions:
   contents: write
 jobs:
-  dump:
+  data:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: fix/item-text
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: untapped 상세 페이지 받기
-        run: node tools-tmp/pages.mjs
-      - name: 커밋
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+      - run: npm ci
+        working-directory: tools
+      - name: 데이터·이미지 수집 (public-beta 그림 포함)
+        run: node tools/fetch-data.mjs
+      - name: fix/item-text 에 커밋
         run: |
-          git add raw
+          git add site/data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "untapped 상세 문구 (임시)" && git push
+          git commit -qm "data: 위키 데이터 갱신 (public-beta 그림)" && git push origin HEAD:fix/item-text
