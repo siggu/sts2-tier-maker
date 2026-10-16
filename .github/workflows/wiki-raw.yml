@@ -1,0 +1,49 @@
+name: (임시) 위키 원본 받기
+on:
+  push:
+    branches: [wip/wiki-raw]
+permissions:
+  contents: write
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 위키 모듈·문서 받기
+        run: |
+          set -u
+          W=https://slaythespire.wiki.gg
+          UA='sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)'
+          mkdir -p raw/modules raw/pages raw/api
+          api() { curl -sS -A "$UA" "$W/api.php?format=json&$1"; sleep 1; }
+          # 모듈 목록 (Module: 이름공간 828)
+          api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=Cards" > raw/api/mod-cards.json
+          api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=Relics" > raw/api/mod-relics.json
+          api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=Potions" > raw/api/mod-potions.json
+          api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=Keywords" > raw/api/mod-keywords.json
+          api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=Beta" > raw/api/mod-beta.json
+          api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=StS2" > raw/api/mod-sts2.json
+          api "action=query&list=search&srnamespace=828&srlimit=100&srsearch=beta" > raw/api/search-beta-modules.json
+          api "action=query&list=search&srnamespace=10&srlimit=100&srsearch=beta" > raw/api/search-beta-templates.json
+          api "action=query&list=search&srlimit=50&srsearch=public%20beta" > raw/api/search-public-beta.json
+          for f in raw/api/mod-*.json; do
+            node -e 'for (const p of JSON.parse(require("fs").readFileSync(process.argv[1])).query?.allpages || []) console.log(p.title)' "$f"
+          done | sort -u > raw/api/modules.txt
+          node -e 'for (const p of JSON.parse(require("fs").readFileSync(process.argv[1])).query?.search || []) console.log(p.title)' raw/api/search-beta-modules.json >> raw/api/modules.txt
+          sort -u -o raw/api/modules.txt raw/api/modules.txt
+          while read -r t; do
+            [ -z "$t" ] && continue
+            f=$(echo "$t" | sed 's/[^A-Za-z0-9._-]/_/g')
+            curl -sS -A "$UA" "$W/index.php?title=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$t")&action=raw" > "raw/modules/$f.lua"; sleep 0.5
+          done < raw/api/modules.txt
+          for t in "Slay the Spire 2:Crimson Mantle" "Template:Beta content" "Template:Beta" "Slay the Spire 2:Cards" "Slay the Spire 2:Public Beta" "Slay the Spire 2:Patch Notes"; do
+            f=$(echo "$t" | sed 's/[^A-Za-z0-9._-]/_/g')
+            curl -sS -A "$UA" "$W/index.php?title=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$t")&action=raw" > "raw/pages/$f.wiki"; sleep 0.5
+          done
+          ls -la raw/modules | head -100
+      - name: 커밋
+        run: |
+          git add raw
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "위키 원본 (임시)" && git push
