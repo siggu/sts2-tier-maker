@@ -2,7 +2,7 @@
 
 Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리스트를 만들고, 무엇이 사기이고 약한지 함께 투표하고, 이상형 월드컵을 즐기는 비공식 팬 사이트입니다.
 
-→ https://siggu.github.io/sts2-tier-maker/
+→ https://sts2-tier-maker.pages.dev/  (예전 주소 `siggu.github.io/sts2-tier-maker`는 새 주소로 자동 이동)
 
 ## 기능
 
@@ -24,7 +24,7 @@ Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리�
 
 | 경로 | 내용 | 배포 |
 | --- | --- | --- |
-| `site/` | 정적 프런트엔드 (빌드 없음, ES 모듈) | GitHub Pages (`.github/workflows/pages.yml`) |
+| `site/` | 정적 프런트엔드 (빌드 없음, ES 모듈) | Cloudflare Pages (`.github/workflows/pages.yml`). GitHub Pages(예전 주소)에는 이동 안내 페이지만 |
 | `api/` | API (Cloudflare Worker + D1). 계약은 [`api/API.md`](api/API.md) | `.github/workflows/api.yml` (D1 마이그레이션 → 배포 → 동작 확인) |
 | `tools/` | 위키에서 게임 데이터를 모으고 언어별 덮어쓰기 파일을 만드는 스크립트 | `.github/workflows/data.yml` (main 의 `tools/**` 변경·매주) |
 
@@ -34,14 +34,15 @@ Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리�
 
 ## 처음 설정
 
-1. **Settings → Pages → Source**를 `GitHub Actions`로 바꿉니다.
+1. **Settings → Pages → Source**를 `GitHub Actions`로 바꿉니다 (예전 주소 이동 안내용).
 2. **Settings → Secrets and variables → Actions**에 `CLOUDFLARE_API_TOKEN`을 넣습니다. 필요한 권한:
    - Account · Workers Scripts · Edit
    - Account · D1 · Edit
    - Account · Workers AI · Read (없으면 AI 검열 없이 배포되고 올린 이미지는 모두 '검토 대기'가 됩니다)
+   - Account · Cloudflare Pages · Edit (사이트 배포, 프로젝트 `sts2-tier-maker`는 처음 배포 때 만들어집니다)
 
    계정 ID는 `api/wrangler.toml`의 `account_id`에 있습니다. 첫 배포 때 D1 데이터베이스 `sts2-balance`가 자동으로 만들어집니다.
-3. **구글 로그인**: Google Cloud Console에서 OAuth 클라이언트(웹)를 만들고, 승인된 JavaScript 원본에 `https://siggu.github.io`를 넣습니다.
+3. **구글 로그인**: Google Cloud Console에서 OAuth 클라이언트(웹)를 만들고, 승인된 JavaScript 원본에 `https://sts2-tier-maker.pages.dev`를 넣습니다.
    공개 값인 클라이언트 ID를 `site/js/config.js`와 `api/wrangler.toml`의 `GOOGLE_CLIENT_ID`에 같은 값으로 넣습니다. 클라이언트 보안 비밀은 쓰지 않습니다(어디에도 넣지 마세요). 비워 두면 로그인 기능이 꺼집니다.
 4. **이미지 검열 AI**: Cloudflare에서 `@cf/meta/llama-3.2-11b-vision-instruct` 모델에 `agree`를 한 번 보내 라이선스에 동의합니다. 동의 전에는 두 번째 모델(llava)로 검사합니다.
 5. **관리자**: 사이트의 프로필 메뉴 → "내 ID"를 `api/wrangler.toml`의 `ADMIN_USERS`(쉼표로 여러 명)에 넣고 배포합니다.

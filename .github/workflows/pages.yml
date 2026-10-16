@@ -1,4 +1,4 @@
-name: 사이트 배포 (GitHub Pages)
+name: 사이트 배포 (Cloudflare Pages · 예전 주소 안내)
 
 on:
   push:
@@ -31,12 +31,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: 캐시 무효화용 버전 붙이기
-        run: tools/stamp-version.sh site "${GITHUB_SHA::8}"
+      # 사이트는 https://sts2-tier-maker.pages.dev 로 옮겼다. 예전 주소(siggu.github.io/sts2-tier-maker)에는
+      # 새 주소로 옮겨 가는 안내 페이지만 둔다 — 화면 주소(#…)와 이 브라우저의 티어표·투표 등을 넘겨 준다 (site/js/migrate.js).
+      - name: 예전 주소 안내 페이지
+        run: |
+          mkdir -p old-site
+          cp tools/redirect-page.html old-site/index.html
+          cp tools/redirect-page.html old-site/404.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: old-site
       - id: deployment
         uses: actions/deploy-pages@v4
 

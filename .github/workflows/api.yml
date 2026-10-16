@@ -122,7 +122,7 @@ jobs:
         if: steps.secrets.outputs.ok == 'true'
         run: |
           API=https://sts2-balance-api.siggu100.workers.dev
-          ORIGIN=https://siggu.github.io
+          ORIGIN=https://sts2-tier-maker.pages.dev
           ITEM="$(node -e 'process.stdout.write(require("../site/data/keys.json").find(k => k.startsWith("curses/")))')"
           VOTER="ci-smoke-${GITHUB_RUN_ID}"
           for i in 1 2 3 4 5 6; do
