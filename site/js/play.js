@@ -451,7 +451,7 @@ function viewVersus(catId, params, ctx) {
   // ---- 월드컵 ----
 
   function extra(item) {
-    const text = cat.tile === 'icon' ? itemDetails(item)[2] : null;
+    const text = cat.tile === 'icon' ? itemDetails(item, { links: true })[2] : null;
     const meta = [item.groupName && item.groupName !== cat.name ? item.groupName : null, item.area].filter(Boolean)[0];
     return [meta ? h('span', { class: 'vs-meta' }, meta) : null, text || null].filter(Boolean);
   }
