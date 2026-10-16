@@ -407,8 +407,8 @@ function cardItem(name, c, id, group) {
     group,
     rarity: c.Rarity.toLowerCase(),
     type: String(c.Type || '').toLowerCase() || undefined,
-    cost: c.Cost ?? undefined,
-    costUp: upgradable && costUp !== undefined && costUp !== c.Cost ? costUp : undefined,
+    cost: playCost(c.Cost),
+    costUp: upgradable && playCost(costUp) !== undefined && costUp !== c.Cost ? costUp : undefined,
     stars: c.StarCost ?? undefined,
     text: formatText(c.Text),
     textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
@@ -417,6 +417,9 @@ function cardItem(name, c, id, group) {
   };
 }
 
+// 위키의 Cost -2 는 '사용할 수 없음'(저주·상태이상 대부분)이라 비용으로 보이지 않는다. -1 은 X 비용.
+const playCost = cost => (cost === undefined || cost === null || cost < -1 ? undefined : cost);
+
 async function curses() {
   const data = await module('Module:Cards/StS2 data/Colorless');
   const items = Object.entries(data)
@@ -424,7 +427,7 @@ async function curses() {
     .map(([name, c]) => {
       const id = slug(name);
       translate(`curses/${id}`, 'cards', name, c.Text, { keywords: true });
-      return { id, name, cost: c.Cost ?? undefined, text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) };
+      return { id, name, cost: playCost(c.Cost), text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) };
     });
   return { id: 'curses', name: 'Curses', tile: 'card', items };
 }
@@ -651,7 +654,7 @@ async function buildGlossary(categories) {
     for (const [name, c] of Object.entries(await tryModule(`Module:Cards/StS2 data/${group}`))) {
       if (CARD_RARITIES.includes(c.Rarity) || c.Rarity === 'Curse') continue;
       const key = `card:${slug(name)}`;
-      if (!defs.has(key)) defs.set(key, { name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''), raw: c.Text, img: c.Image, type: 'card', cost: c.Cost, cardType: c.Type });
+      if (!defs.has(key)) defs.set(key, { name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''), raw: c.Text, img: c.Image, type: 'card', cost: playCost(c.Cost), cardType: c.Type });
     }
   }
 

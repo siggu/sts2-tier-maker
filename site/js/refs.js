@@ -7,15 +7,13 @@
 
 import { h } from './ui.js';
 import { t, lang } from './i18n.js';
-import { rarityName, typeName, loadData } from './data.js';
+import { rarityName, typeName } from './data.js';
 
 const MAX_DEPTH = 2; // 문구 속 용어(1) → 상자 속 용어(2)
 const OPEN_DELAY = 120;
 const CLOSE_DELAY = 220;
 
 let db = null;
-// 상세 창 밖(툴팁·선택 칸·월드컵)에서는 db 를 넘기지 않으므로 받아 둔다 (loadData 는 한 번만 읽는다)
-loadData().then(d => { db ||= d; }).catch(() => {});
 const stack = []; // 열린 상자: { anchor, el, depth, pinned }
 let openTimer = 0;
 let closeTimer = 0;
@@ -24,7 +22,7 @@ let closeTimer = 0;
 export function linkRefs(el, database, refs = null, depth = 1) {
   if (!el || depth > MAX_DEPTH) return el;
   if (database) db = database;
-  if (!db) { loadData().then(d => { db = d; linkRefs(el, d, refs, depth); }).catch(() => {}); return el; }
+  if (!db) return el;
   install();
   for (const b of el.querySelectorAll('[data-ref]')) decorate(b, depth);
   if (refs?.length && lang !== 'en') {
@@ -44,8 +42,6 @@ function decorate(node, depth, key = node.dataset.ref) {
   node.dataset.ref = key;
   node.dataset.depth = String(depth);
   node.classList.add('ref');
-  // 단추(월드컵 고르기 등) 안에서는 마우스·터치로만 연다 (단추 속 단추는 키보드 순서를 망친다)
-  if (node.parentElement?.closest('button, a')) return;
   node.setAttribute('role', 'button');
   node.setAttribute('tabindex', '0');
   node.setAttribute('aria-haspopup', 'dialog');
@@ -220,21 +216,4 @@ function card(term, depth) {
       term.kind === 'term' && term.textEn && h('div', { class: 'ref-note' }, t('ref.englishText'))));
   linkRefs(body, db, refs, depth + 1);
   return el;
-}
-
-// 마우스를 올렸을 때만 잠깐 뜨는 툴팁(누를 수 없음)에 붙이는 '관련 용어' 목록 — 게임의 키워드 설명처럼
-const TERM_LIMIT = 4;
-export function termList(item) {
-  if (!db || !item?.refs?.length) return null;
-  const terms = item.refs.map(k => db.term(k)).filter(Boolean).slice(0, TERM_LIMIT);
-  if (!terms.length) return null;
-  return h('div', { class: 'tip-terms' }, terms.map(term => {
-    const img = term.kind === 'item' ? (term.category.tile === 'card' ? null : term.item.img) : (term.type === 'card' ? null : term.img);
-    const text = term.kind === 'item' ? strip(term.item.text) : term.text;
-    return h('div', { class: 'tip-term' },
-      img ? h('img', { src: img, alt: '', loading: 'lazy', onerror: e => e.target.remove() }) : h('span', { class: 'tip-term-dot', 'aria-hidden': 'true' }),
-      h('div', {},
-        h('b', {}, term.name),
-        h('span', { class: 'tip-term-text', html: text.replace(/<b[^>]*>/g, '<b>').replace(/\n/g, ' ') })));
-  }));
 }

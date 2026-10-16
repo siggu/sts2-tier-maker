@@ -3,7 +3,6 @@
 import { enableDrag } from './dnd.js';
 import { rarityName, typeName } from './data.js';
 import { t } from './i18n.js';
-import { linkRefs, termList } from './refs.js';
 
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -64,8 +63,7 @@ export function attachTooltips(root, lookup) {
   });
 }
 
-// links: 효과 문구 속 용어를 팝업 단추로 (누를 수 있는 곳에서만 — 마우스 올림 툴팁은 아래 termList 로)
-export function itemDetails(item, { links = false } = {}) {
+export function itemDetails(item) {
   const meta = [
     item.nameEn,
     item.groupName,
@@ -77,12 +75,12 @@ export function itemDetails(item, { links = false } = {}) {
     h('div', { class: 'tip-title' }, item.name),
     meta && h('div', { class: 'tip-meta' }, meta),
     // text 는 수집 스크립트가 이스케이프한 뒤 만든 HTML 이다.
-    item.text && (links ? linkRefs(h('div', { class: 'tip-text', html: item.text }), null, item.refs) : h('div', { class: 'tip-text', html: item.text })),
+    item.text && h('div', { class: 'tip-text', html: item.text }),
   ];
 }
 
 export function tipDetails(item) {
-  return [...itemDetails(item), termList(item), h('div', { class: 'tip-hint' }, t('tip.hint'))].filter(Boolean);
+  return [...itemDetails(item), h('div', { class: 'tip-hint' }, t('tip.hint'))];
 }
 
 export function showTip(anchor, item) {
@@ -205,7 +203,7 @@ export function board({ template, rows, pool, onMove, onRowMenu, onOpen, decorat
     el.focus({ preventScroll: true });
     const item = lookup(id);
     hint.replaceChildren(
-      h('div', { class: 'select-hint-body' }, ...itemDetails(item, { links: true })),
+      h('div', { class: 'select-hint-body' }, ...itemDetails(item)),
       h('div', { class: 'select-hint-help' }, t('select.help'), h('span', { class: 'kbd-only' }, ` · ${t('select.keys', { n: rows.length })}`)),
       h('div', { class: 'select-hint-actions' },
         onOpen && h('button', { class: 'btn small', onclick: () => { const x = selected; select(null); onOpen(x); } }, t('select.detail')),

@@ -341,16 +341,6 @@ body.is-dragging * { cursor: grabbing !important; }
 .ref-note { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ref-pop { animation: none; } }
 
-/* 툴팁 속 '관련 용어' (refs.js termList) */
-.tip-terms { display: grid; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(217, 164, 65, .2); }
-.tip-term { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 7px; align-items: start; font-size: 12.5px; line-height: 1.45; color: var(--text); }
-.tip-term img { width: 20px; height: 20px; object-fit: contain; }
-.tip-term-dot { width: 6px; height: 6px; margin: 6px 7px; border-radius: 50%; background: var(--gold); }
-.tip-term b { margin-right: 5px; color: var(--gold-hi); }
-.tip-term-text b { margin: 0; color: var(--gold); }
-.tip-term-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.tip-term > div { min-width: 0; }
-
 .tip-hint { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(217, 164, 65, .2); font-size: 11.5px; color: var(--muted); }
 
 /* ---- 팝오버 ---- */
