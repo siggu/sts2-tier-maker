@@ -133,7 +133,7 @@ export async function renderPng(template, state) {
 
   ctx.fillStyle = 'rgba(233,226,207,.55)';
   ctx.font = '500 14px "Pretendard Variable", sans-serif';
-  ctx.fillText(`siggu.github.io/sts2-tier-maker · ${t('png.footer')}`, PAD, height - 24);
+  ctx.fillText(`sts2-tier-maker.pages.dev · ${t('png.footer')}`, PAD, height - 24);
 
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }

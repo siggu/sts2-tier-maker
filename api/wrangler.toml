@@ -9,7 +9,7 @@ preview_urls = false
 
 # 프런트엔드(GitHub Pages)에서 호출을 허용할 출처. 쉼표로 여러 개 지정.
 [vars]
-ALLOWED_ORIGINS = "https://siggu.github.io,http://localhost:8000,http://127.0.0.1:8000"
+ALLOWED_ORIGINS = "https://sts2-tier-maker.pages.dev,https://siggu.github.io,http://localhost:8000,http://127.0.0.1:8000"
 # 구글 로그인 OAuth 클라이언트 ID (공개 값). 비어 있으면 로그인이 꺼진다. site/js/config.js 와 같은 값.
 GOOGLE_CLIENT_ID = "713762759027-mo3pdgg1f1pg1jdoobqojvc5lfbo6qo9.apps.googleusercontent.com"
 # 관리자 구글 sub (쉼표로 여러 개). 관리자는 아무 글·댓글이나 지울 수 있고 올린 이미지를 검토한다 (#/admin).

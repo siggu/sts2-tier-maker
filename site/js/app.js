@@ -1,3 +1,5 @@
+// 예전 주소에서 옮겨 온 저장소를 받는다 — 다른 모듈이 저장소를 읽기 전에 (migrate.js)
+import './migrate.js';
 import { loadData, facetLabel, groupLabel } from './data.js';
 import { t, lang, LANGS, setLang, translateStatic, collator } from './i18n.js';
 import { h, toast, tile, hideTip, attachTooltips } from './ui.js';

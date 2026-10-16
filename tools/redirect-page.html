@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- 예전 주소(siggu.github.io/sts2-tier-maker)에 올리는 안내 페이지. 새 주소로 옮겨 가며, 이 브라우저에 저장된
+       티어표·투표 등(localStorage 의 sts2… 키, 로그인 세션 제외)을 #migrate= 로 넘긴다 (site/js/migrate.js 가 받는다). -->
+  <meta name="referrer" content="origin">
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="https://sts2-tier-maker.pages.dev/">
+  <meta http-equiv="refresh" content="3;url=https://sts2-tier-maker.pages.dev/">
+  <title>첨탑의 티어 메이커 · 주소가 바뀌었습니다</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d0f14; color: #e8e2d4;
+      font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', sans-serif; text-align: center; padding: 16px; }
+    a { color: #f0c26a; }
+  </style>
+</head>
+<body>
+  <main>
+    <p>첨탑의 티어 메이커 주소가 바뀌었습니다. 잠시 후 이동합니다.<br>The site has moved.</p>
+    <p><a id="go" href="https://sts2-tier-maker.pages.dev/">https://sts2-tier-maker.pages.dev/</a></p>
+  </main>
+  <script>
+    (() => {
+      const NEW = 'https://sts2-tier-maker.pages.dev/';
+      const hash = location.hash && location.hash !== '#' ? location.hash : '#/';
+      let target = NEW + location.search + hash;
+      try {
+        const data = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (/^sts2/.test(key) && key !== 'sts2.session.v1' && key !== 'sts2.acct.owner') data[key] = localStorage.getItem(key);
+        }
+        if (Object.keys(data).length) {
+          const bytes = new TextEncoder().encode(JSON.stringify(data));
+          let bin = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+          const packed = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          // 주소가 너무 길면 옮기지 않고 이동만 한다
+          if (packed.length < 1500000) target = `${NEW}${location.search}#migrate=${packed}&to=${encodeURIComponent(hash)}`;
+        }
+      } catch (err) { /* 저장소를 못 읽으면 이동만 */ }
+      document.getElementById('go').href = target;
+      location.replace(target);
+    })();
+  </script>
+</body>
+</html>
