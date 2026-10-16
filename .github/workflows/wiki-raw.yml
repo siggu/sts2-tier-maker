@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix/item-text
+          ref: wip/term-popups
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -21,9 +21,9 @@ jobs:
         working-directory: tools
       - name: 데이터·이미지 수집 (public-beta 그림 포함)
         run: node tools/fetch-data.mjs
-      - name: fix/item-text 에 커밋
+      - name: wip/term-popups 에 커밋
         run: |
           git add site/data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "data: 위키 데이터 갱신 (public-beta 그림) 2" && git push origin HEAD:fix/item-text
+          git commit -qm "data: 위키 데이터 갱신 (용어 팝업)" && git push origin HEAD:wip/term-popups
