@@ -9,27 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 패치 노트·카드 데이터 받기
-        run: |
-          set -u
-          W=https://slaythespire.wiki.gg
-          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
-          mkdir -p raw/patch raw/untapped
-          enc() { node -e 'console.log(encodeURIComponent(process.argv[1]))' "$1"; }
-          for t in "V0.111.0 - Beta Patch" "V0.110.1 - Beta Hotfix" "V0.110.0 - Beta Patch" "V0.109.1 - Beta Hotfix" "V0.109.0 - Beta Patch" "V0.108.0 - Beta Patch" "V0.107.1 - Major Update 2" "V0.107.0 - Beta Patch" "V0.103.3 - Patch"; do
-            f=$(echo "$t" | sed 's/[^A-Za-z0-9._-]/_/g')
-            curl -sS -A "$UA" "$W/index.php?title=$(enc "Slay the Spire 2:$t")&action=raw" > "raw/patch/$f.wiki" || true
-            sleep 1
-          done
-          for u in en/cards en/relics en/potions en/patch-notes en/patch-notes/v0.111.0 en/patch-notes/v0.110.1 en/patch-notes/v0.110.0 en/patch-notes/v0.109.0 en/cards/crimson-mantle en/card/crimson-mantle; do
-            f=$(echo "$u" | sed 's/[^A-Za-z0-9._-]/_/g')
-            curl -sS -L -A "$UA" -o "raw/untapped/$f.html" -w "$u %{http_code} %{size_download}\n" "https://sts2.untapped.gg/$u?tab=notes" || true
-            sleep 1
-          done
-          ls -la raw/patch raw/untapped
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: untapped 상세 페이지 받기
+        run: node tools-tmp/scrape.mjs
       - name: 커밋
         run: |
           git add raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "패치 노트 원본 (임시)" && git push
+          git commit -qm "untapped 항목 문구 (임시)" && git push
