@@ -29,6 +29,8 @@ Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리�
 | `tools/` | 위키에서 게임 데이터를 모으고 언어별 덮어쓰기 파일을 만드는 스크립트 | `.github/workflows/data.yml` (main 의 `tools/**` 변경·매주) |
 
 - `site/data/sts2.json`(영어 기본) + `site/data/i18n/<언어>.json`(언어별 덮어쓰기), 이미지는 `site/data/img/`
+- **게임 버전 기준: 항상 public-beta.** 수치·효과는 위키 데이터(public-beta 기준으로 갱신됨), 카드 그림은 위키의 `Beta-` 그림이 있으면 그것을 쓴다. 안정판과 다르면 public-beta 쪽이 맞다
+- 게임 언어 파일(`tools/l10n/ko.json`)에 이름이 없는 항목은 `hidden: true`로 사이트에 나오지 않는다 (데이터 갱신 때마다 다시 정한다. 새 언어 파일을 넣으면 이름이 생긴 항목은 저절로 다시 보인다)
 - 사이트 문구는 `site/js/i18n-*.js`, 프로필 얼굴은 `site/img/avatars/`, 브라우저 이미지 검사 모델은 `site/vendor/nsfwjs/`
 - 데이터 갱신 워크플로가 끝나면 사이트·API 배포가 이어서 돈다
 - 검색엔진용 페이지: 배포 때 `tools/build-seo.mjs`가 템플릿마다 진짜 주소의 페이지(`/tier/…`, 5개 언어), `sitemap.xml`, `robots.txt`를 만든다 (저장소에는 넣지 않음). 링크 미리보기 그림은 `site/img/og.png`

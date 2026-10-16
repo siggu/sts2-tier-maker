@@ -1,6 +1,8 @@
 // Slay the Spire Wiki(slaythespire.wiki.gg)의 StS2 데이터 모듈을 읽어
 // site/data/sts2.json, site/data/keys.json 과 이미지(site/data/img/...)를 만든다.
 //
+// 기준 버전: 항상 public-beta. 위키 데이터 모듈은 public-beta 수치로 갱신되고, 카드 그림은 'Beta-<파일>' 이 있으면 그것을 쓴다.
+//
 // 사용: node tools/fetch-data.mjs            (전체, 이미 받은 이미지는 sha1 이 같으면 건너뜀)
 //       node tools/fetch-data.mjs --no-images (데이터만)
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
@@ -8,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { parseLuaData } from './lua.mjs';
-import { alignValues, renderKoBoth, splitKeywords, withKeywords } from './l10n.mjs';
+import { alignValues, looseValues, renderKoBoth, splitKeywords, withKeywords, wikiTemplate } from './l10n.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'site', 'data');
@@ -50,6 +52,8 @@ const nameOf = (lang, table, en) => { const v = entryOf(lang, table, en); return
 const WORDS = Object.fromEntries(ACTIVE.map(lang => [lang, Object.fromEntries(['cards', 'relics', 'potions', 'enchantments']
   .flatMap(t => Object.entries(L10N[lang][t] || {}).map(([en, v]) => [en, v.name])))]));
 const stats = Object.fromEntries(ACTIVE.map(lang => [lang, { total: 0, name: 0, text: 0 }]));
+// 점검용: L10N_AUDIT=<파일> 이면 번역 재료(틀·위키 문구·읽은 값)를 그 파일에 남긴다
+const AUDIT = process.env.L10N_AUDIT ? [] : null;
 // 게임에 따로 없는 묶음 이름
 const SHARED_NAMES = {
   en: { shared: 'Shared', colorless: 'Colorless' },
@@ -92,7 +96,10 @@ function localize(lang, table, enName, wikiText, { keywords = false, upgradable 
     }
   } else if (e.en && e.tr && wikiText) {
     const split = keywords ? splitKeywords(wikiText) : { text: wikiText, keywords: [] };
-    const vals = alignValues(e.en, split.text);
+    // 문장이 딱 맞지 않으면(위키가 조금 다르게 적은 경우) 수치를 차례대로 짝짓는다
+    const exact = alignValues(e.en, split.text);
+    const vals = exact ?? looseValues(e.en, split.text);
+    AUDIT?.push({ lang, table, enName, wiki: split.text, keywords: split.keywords, en: e.en, tr: e.tr, vals, loose: !exact && Boolean(vals) });
     if (vals) {
       try {
         const r = renderKoBoth(e.tr, vals, WORDS[lang]);
@@ -171,16 +178,22 @@ export function formatText(raw, mode = 'both') {
   let s = String(raw)
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1')
-    .replace(/\{\{([^{}|]*)\}\}/g, '$1')
+    // 위키 틀: {{QueryLink|Cards|type:Attack|Attacks|2}} → Attacks, {{KW|Osty|Osty's|2}} → Osty's (키워드는 굵게, 아래에서 $ 표시로)
+    .replace(/\{\{([^{}]*)\}\}/g, (m, body) => (/^KW2?\|/.test(body) ? '$' : '') + wikiTemplate(m, body))
     .replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1')
-    .replace(/'''?/g, '');
+    .replace(/'''?/g, '')
+    .replace(/@([A-Z][a-z]+)/g, '$1'); // @Gold → Gold (아이콘 이름)
   s = escapeHtml(s);
   s = s.replace(/\[([^\[\]|]*)\|([^\[\]|]*)\]/g, (_, a, b) => {
     if (mode === 'up') return b ? `<span class="up">${b}</span>` : '';
     return `${a}<span class="up">(${b})</span>`;
   });
   s = s.replace(/\$([A-Z][A-Za-z']*(?:\s(?:of|the)\s[A-Z][A-Za-z']*)?)/g, '<b>$1</b>');
+  // 같은 아이콘이 넷 이상 이어지면 게임처럼 "5 ★" 로 줄인다 (번역 문구와 같은 규칙)
+  s = s.replace(/(?:@([A-Z]{2})\s?)+/g, (m, code) => {
+    const n = m.match(/@[A-Z]{2}/g);
+    return n.length >= 4 && n.every(x => x === n[0]) ? `${n.length}${n[0]}${/\s$/.test(m) ? ' ' : ''}` : m;
+  });
   s = s.replace(/@([A-Z]{2})/g, (_, code) => {
     if (code === 'ST') return '<i class="ic star">★</i>';
     if (code.endsWith('E')) return '<i class="ic energy">⚡</i>';
@@ -205,10 +218,11 @@ export function formatEnemyText(raw) {
 const imageJobs = [];
 
 // 위키 파일을 받아 webp 로 줄여 저장할 작업을 등록하고, 사이트에서 쓸 경로를 돌려준다.
-function image(file, category, id, { height, width, trim = false } = {}) {
+// beta: 위키의 public-beta 그림('Beta-<파일>')이 있으면 그것을 쓴다 (카드). 사이트는 public-beta 기준이다.
+function image(file, category, id, { height, width, trim = false, beta = false } = {}) {
   if (!file) return null;
   const rel = `data/img/${category}/${id}.webp`;
-  imageJobs.push({ file, out: join(ROOT, 'site', rel), height, width, trim });
+  imageJobs.push({ file, out: join(ROOT, 'site', rel), height, width, trim, beta: beta ? `Beta-${file}` : null });
   return rel;
 }
 
@@ -274,7 +288,9 @@ async function runImageJobs() {
   let manifest = {};
   try { manifest = JSON.parse(await readFile(MANIFEST, 'utf8')); } catch { /* 처음 */ }
 
-  const resolved = await resolveFiles(imageJobs.map(j => j.file));
+  const resolved = await resolveFiles(imageJobs.flatMap(j => [j.file, j.beta].filter(Boolean)));
+  const betaUsed = imageJobs.filter(j => j.beta && resolved.has(j.beta)).length;
+  if (betaUsed) console.log(`public-beta 그림: ${betaUsed}개`);
   let done = 0, failed = 0, skipped = 0;
   const total = imageJobs.length;
   const progress = setInterval(() => console.log(`이미지 진행: ${done + failed + skipped}/${total}`), 15_000);
@@ -283,7 +299,7 @@ async function runImageJobs() {
   async function worker() {
     for (let job = queue.shift(); job; job = queue.shift()) {
       const rel = job.out.slice(join(ROOT, 'site').length + 1);
-      const info = resolved.get(job.file);
+      const info = (job.beta && resolved.get(job.beta)) || resolved.get(job.file);
       try {
         if (!info) throw new Error('위키에 파일 없음');
         // 원본(sha1)과 변환 설정이 그대로이고 파일이 있으면 다시 받지 않는다.
@@ -320,11 +336,28 @@ async function runImageJobs() {
 
 const CARD_RARITIES = ['Common', 'Uncommon', 'Rare', 'Ancient', 'Event'];
 
+// 위키 데이터가 아직 public-beta 를 따라가지 못한 카드 (sts2.untapped.gg 의 v0.111.0 베타 문구로 2026-10-16 확인).
+// 위키가 고쳐져 값이 같아지면 로그로 알려 준다 — 그때 여기서 지우면 된다.
+const BETA_FIXES = {
+  'Juggernaut': { Text: 'Whenever you gain $Block, deal [6|8] damage to a random enemy.' },
+  'Brightest Flame': { Text: 'Gain [@CE@CE|@CE@CE@CE].<br>Draw [2|3] cards.<br>Lose 2 Max HP.' },
+  'Expect a Fight': { Cost: 3, CostPlus: undefined, Text: 'Gain [15|16] $Block.<br>Gains [5|8] additional $Block for each $Strength you have.' },
+  'Guiding Star': { StarCost: 1, Text: 'Deal [12|13] damage.<br>Next turn, draw [2|3] cards.' },
+  'Abundance': { CostPlus: 0, Text: 'Choose 1 of 3 Upgraded Powers to add into your Hand. It\'s free to play this turn.<br>$Exhaust.' },
+};
+function betaFix(name, c) {
+  const fix = BETA_FIXES[name];
+  if (!fix) return c;
+  if (Object.entries(fix).every(([k, v]) => c[k] === v)) console.log(`  위키가 public-beta 를 반영함 — BETA_FIXES 에서 '${name}' 를 지워도 된다`);
+  return { ...c, ...fix };
+}
+
 async function cards() {
   const items = [];
   for (const group of [...CHARACTERS.map(c => c.en), 'Colorless']) {
     const data = await module(`Module:Cards/StS2 data/${group}`);
-    for (const [name, c] of Object.entries(data)) {
+    for (const [name, raw] of Object.entries(data)) {
+      const c = betaFix(name, raw);
       if (!CARD_RARITIES.includes(c.Rarity)) continue;
       if (c.Multiplayer && String(c.Multiplayer).toLowerCase() !== 'no') continue;
       const ch = charByEn.get(c.Color);
@@ -361,8 +394,8 @@ function cardItem(name, c, id, group) {
     stars: c.StarCost ?? undefined,
     text: formatText(c.Text),
     textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
-    img: image(c.Image, 'cards', id, { height: 300 }),
-    imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300 }) : undefined,
+    img: image(c.Image, 'cards', id, { height: 300, beta: true }),
+    imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300, beta: true }) : undefined,
   };
 }
 
@@ -668,6 +701,16 @@ async function main() {
     }
     cat.items.sort((a, b) => a.name.localeCompare(b.name, 'en'));
   }
+  // 게임 언어 파일(한국어)에 이름이 없는 항목은 숨긴다 (hidden: true). 위키에만 있고 게임 파일에는 아직 없는 항목이다.
+  // 매번 새로 정하므로, 새 언어 파일을 넣고 다시 돌리면 이름이 생긴 항목은 저절로 다시 보이고, 사라진 항목은 숨겨진다.
+  const hidden = [];
+  for (const cat of categories) {
+    for (const item of cat.items) {
+      if (L10N.ko && !OVERLAY.ko.items[`${cat.id}/${item.id}`]?.name) { item.hidden = true; hidden.push(`${cat.id}/${item.id}`); }
+    }
+  }
+  if (hidden.length) console.log(`숨김(게임 언어 파일에 이름 없음) ${hidden.length}개: ${hidden.join(', ')}`);
+  // 숨긴 항목도 키는 남긴다 (이미 받은 표·댓글이 다시 보일 때 그대로 이어지게)
   const keys = categories.flatMap(c => c.items.map(i => `${c.id}/${i.id}`)).sort();
   const known = new Set(keys);
   for (const lang of ACTIVE) {
@@ -692,6 +735,7 @@ async function main() {
   await writeFile(join(DATA, 'keys.json'), JSON.stringify(keys));
   for (const lang of ACTIVE) await writeFile(join(DATA, 'i18n', `${lang}.json`), JSON.stringify(OVERLAY[lang]));
 
+  if (AUDIT) await writeFile(process.env.L10N_AUDIT, JSON.stringify(AUDIT));
   for (const c of categories) console.log(`${c.name}: ${c.items.length}`);
   for (const lang of ACTIVE) {
     const st = stats[lang];
