@@ -224,5 +224,6 @@ export default {
   'detail.ascNote': 'numbers change at higher Ascension.',
   'detail.movesEnglish': 'Move descriptions are the wiki’s English text.',
   'detail.textEnglish': 'The official translation of this effect is not matched yet, so the English text is shown.',
+  'detail.betaNote': 'Card text follows the latest public beta. Numbers on the card image may differ.',
   'detail.relicsN': '{n} relics offered',
 };

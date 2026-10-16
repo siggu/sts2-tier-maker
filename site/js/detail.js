@@ -135,6 +135,8 @@ function bodyFor(item, category, db, showUp = false) {
     return [
       cost && h('p', { class: `detail-cost${costChanged ? ' changed' : ''}` }, cost),
       html(`detail-text${showUp ? ' is-up' : ''}`, text),
+      // 설명은 public-beta 기준인데 카드 그림(위키)은 안정판일 수 있다 (README 기준 버전)
+      category.id === 'cards' && h('p', { class: 'detail-note detail-info' }, h('span', { class: 'info-ic', 'aria-hidden': 'true' }, 'i'), h('span', {}, t('detail.betaNote'))),
       item.textEn && h('p', { class: 'detail-note' }, t('detail.textEnglish')),
     ];
   }

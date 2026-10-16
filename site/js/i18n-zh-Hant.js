@@ -224,5 +224,6 @@ export default {
   'detail.ascNote': '會隨晉階等級變化。',
   'detail.movesEnglish': '行動說明為 Wiki 的英文原文。',
   'detail.textEnglish': '此項目的效果尚未對應到官方譯文，因此顯示英文原文。',
+  'detail.betaNote': '卡牌說明以最新公開測試版為準，可能與卡圖中的數值不同。',
   'detail.relicsN': '提供 {n} 件遺物',
 };

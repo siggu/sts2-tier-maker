@@ -224,5 +224,6 @@ export default {
   'detail.ascNote': '会随进阶等级变化。',
   'detail.movesEnglish': '行动说明为 Wiki 的英文原文。',
   'detail.textEnglish': '此项目的效果暂时未能对应到官方译文，因此显示英文原文。',
+  'detail.betaNote': '卡牌说明以最新公开测试版为准，可能与卡图中的数值不同。',
   'detail.relicsN': '提供 {n} 件遗物',
 };
