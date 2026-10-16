@@ -1,0 +1,4 @@
+# Cloudflare Pages 주소 규칙 (GitHub Pages 에서는 쓰이지 않는다).
+# 구글 Search Console 확인 파일: Cloudflare Pages 는 xxx.html 주소를 확장자 없는 주소로 308 이동시키므로,
+# 이동 없이 200 으로 내용을 보여 주도록 .txt 파일로 바꿔 보여 준다.
+/googleeaef80433acc5896.html /googleeaef80433acc5896.txt 200
