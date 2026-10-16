@@ -225,5 +225,13 @@ export default {
   'detail.movesEnglish': '行動の説明は Wiki の英語原文です。',
   'detail.textEnglish': 'この項目は公式翻訳の効果文をまだ合わせられていないため、英語の原文を表示しています。',
   'detail.betaNote': 'カードの説明は最新のパブリックベータ版に基づいています。カード画像の数値とは異なる場合があります。',
+  'ref.type.buff': 'バフ',
+  'ref.type.debuff': 'デバフ',
+  'ref.type.keyword': 'キーワード',
+  'ref.type.orb': 'オーブ',
+  'ref.type.character': 'キャラクター',
+  'ref.type.card': 'カード',
+  'ref.type.potion': 'ポーション',
+  'ref.englishText': '説明はWikiの英語原文です。',
   'detail.relicsN': 'もらえるレリック {n}個',
 };

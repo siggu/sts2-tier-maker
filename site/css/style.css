@@ -311,6 +311,36 @@ body.is-dragging * { cursor: grabbing !important; }
 .tip-text .ic { font-style: normal; }
 .tip-text .ic.energy { color: #f5c451; }
 .tip-text .ic.star { color: #f3dfae; }
+/* ---- 용어 팝업 (refs.js): 효과 문구 속 용어 → 그림·설명 상자 ---- */
+.ref {
+  cursor: help;
+  text-decoration: underline dotted rgba(217, 164, 65, .7);
+  text-decoration-thickness: 1.5px; text-underline-offset: 3px;
+  border-radius: 3px;
+}
+.ref:hover, .ref[aria-expanded="true"] { color: var(--gold-hi); text-decoration-style: solid; background: rgba(217, 164, 65, .12); }
+.ref:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.ref-pop {
+  position: fixed; left: 0; top: 0; z-index: 120;
+  display: flex; gap: 10px; align-items: flex-start;
+  width: max-content; max-width: 320px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #2a241b, #1b1712);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .6);
+  animation: ref-in .12s ease-out;
+}
+.ref-pop[data-depth="2"] { z-index: 121; border-color: var(--gold); }
+@keyframes ref-in { from { opacity: 0; transform: translateY(-3px); } }
+.ref-img { flex: none; width: 40px; height: 40px; object-fit: contain; }
+.ref-pop.is-card .ref-img { width: 84px; height: auto; }
+.ref-body { min-width: 0; max-width: 240px; }
+.ref-pop:not(.is-card) .ref-body { max-width: 260px; }
+.ref-text { white-space: pre-line; }
+.ref-note { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .ref-pop { animation: none; } }
+
 .tip-hint { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(217, 164, 65, .2); font-size: 11.5px; color: var(--muted); }
 
 /* ---- 팝오버 ---- */

@@ -225,5 +225,13 @@ export default {
   'detail.movesEnglish': '行动说明为 Wiki 的英文原文。',
   'detail.textEnglish': '此项目的效果暂时未能对应到官方译文，因此显示英文原文。',
   'detail.betaNote': '卡牌说明以最新公开测试版为准，可能与卡图中的数值不同。',
+  'ref.type.buff': '增益',
+  'ref.type.debuff': '减益',
+  'ref.type.keyword': '关键词',
+  'ref.type.orb': '充能球',
+  'ref.type.character': '角色',
+  'ref.type.card': '卡牌',
+  'ref.type.potion': '药水',
+  'ref.englishText': '说明为Wiki英文原文。',
   'detail.relicsN': '提供 {n} 件遗物',
 };

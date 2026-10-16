@@ -5,6 +5,7 @@ import { h } from './ui.js';
 import { rarityName, typeName } from './data.js';
 import { t, lang } from './i18n.js';
 import { detailExtras } from './community.js';
+import { linkRefs, closeAll as closeRefs } from './refs.js';
 
 let current = null;
 
@@ -51,6 +52,9 @@ export function openDetail(item, category, db) {
         }, `${t('detail.wiki')} ↗`),
       ),
     );
+    // 효과 문구 속 용어 팝업 (번역 문구는 item.refs 의 번역 이름으로 찾는다)
+    closeRefs();
+    for (const el of panel.querySelectorAll('.detail-text, .moves li > span')) linkRefs(el, db, item.refs);
   }
 
   function toggle() {
@@ -77,6 +81,7 @@ export function openDetail(item, category, db) {
 }
 
 export function closeDetail() {
+  closeRefs();
   if (current) { const c = current; current = null; c(); }
 }
 
@@ -131,7 +136,7 @@ function bodyFor(item, category, db, showUp = false) {
   if (category.id === 'cards' || category.id === 'curses') {
     const costChanged = showUp && item.costUp !== undefined;
     const cost = costText(costChanged ? item.costUp : item.cost, item.stars);
-    const text = showUp ? (item.textUp || item.text) : item.text.replace(/<span class="up">\([^<]*\)<\/span>/g, '');
+    const text = showUp ? (item.textUp || item.text) : item.text.replace(/<span class="up">\([\s\S]*?\)<\/span>/g, '');
     return [
       cost && h('p', { class: `detail-cost${costChanged ? ' changed' : ''}` }, cost),
       html(`detail-text${showUp ? ' is-up' : ''}`, text),
