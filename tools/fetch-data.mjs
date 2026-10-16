@@ -189,6 +189,11 @@ export function formatText(raw, mode = 'both') {
     return `${a}<span class="up">(${b})</span>`;
   });
   s = s.replace(/\$([A-Z][A-Za-z']*(?:\s(?:of|the)\s[A-Z][A-Za-z']*)?)/g, '<b>$1</b>');
+  // 같은 아이콘이 넷 이상 이어지면 게임처럼 "5 ★" 로 줄인다 (번역 문구와 같은 규칙)
+  s = s.replace(/(?:@([A-Z]{2})\s?)+/g, (m, code) => {
+    const n = m.match(/@[A-Z]{2}/g);
+    return n.length >= 4 && n.every(x => x === n[0]) ? `${n.length}${n[0]}${/\s$/.test(m) ? ' ' : ''}` : m;
+  });
   s = s.replace(/@([A-Z]{2})/g, (_, code) => {
     if (code === 'ST') return '<i class="ic star">★</i>';
     if (code.endsWith('E')) return '<i class="ic energy">⚡</i>';

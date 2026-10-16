@@ -32,3 +32,8 @@ test('위키 틀은 보이는 글자로 (숫자 인자를 쓰지 않는다)', ()
   assert.equal(formatText("{{KW|Osty|Osty's|2}} attacks deal 4 additional damage."), "<b>Osty's</b> attacks deal 4 additional damage.");
   assert.equal(formatText('procure a {{2|potion|Potion}} and {{P|Potion-Shaped Rock||2}}'), 'procure a potion and Potion-Shaped Rock');
 });
+
+test('같은 아이콘 넷 이상은 숫자와 아이콘 하나로', () => {
+  assert.equal(formatText('Gain @ST@ST@ST@ST@ST.'), 'Gain 5<i class="ic star">★</i>.');
+  assert.equal(formatText('Gain @CE@CE@CE.'), 'Gain <i class="ic energy">⚡</i><i class="ic energy">⚡</i><i class="ic energy">⚡</i>.');
+});
