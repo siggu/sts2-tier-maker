@@ -30,6 +30,7 @@
 | `migrations/0005_cups.sql` | cups, cup_items, cup_likes, images (사용자 월드컵) |
 | `migrations/0006_bracket_stats.sql` | worldcup_stats·cup_items 에 expected, progress, tracked, tracked_champ |
 | `migrations/0007_image_moderation.sql` | images 에 status, reports, ai, purpose, reviewed_by, reviewed_at; image_blocklist |
+| `migrations/0011_comment_replies.sql` | comments 에 parent_id, reply_to (답글) |
 
 `handleAccount` / `handlePlay` / `handleCups` / `handleAdmin` 은 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
 
@@ -55,6 +56,7 @@ reactions(post_id, user_id, v INTEGER, PRIMARY KEY(post_id, user_id))          -
 comments(id TEXT PK, target TEXT, user_id, body TEXT, created INTEGER,
          likes INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, deleted INTEGER DEFAULT 0)
          -- target: 'post:<postId>' 또는 'item:<카테고리/아이템id>'
+         -- (0011) parent_id TEXT: NULL = 맨 위 댓글, 아니면 그 맨 위 댓글 id (답글). reply_to TEXT: 답글의 답글이면 그 답글 작성자 users.id
 comment_likes(comment_id, user_id, PRIMARY KEY(comment_id, user_id))
 reports(kind TEXT, target_id TEXT, user_id TEXT, reason TEXT, created INTEGER, PRIMARY KEY(kind, target_id, user_id))
 ```
@@ -113,17 +115,29 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 
 | 요청 | 설명 |
 |---|---|
-| `GET /gallery/:id/comments` | `{ comments: [comment] }` (오래된 순, 최대 200) |
-| `POST /gallery/:id/comments` `{ body }` 🔒 | `{ comment }` |
-| `GET /items/:category/:id/comments?sort=new|top` | `{ comments: [comment] }` (최대 200) |
-| `POST /items/:category/:id/comments` `{ body }` 🔒 | `{ comment }` |
+| `GET /gallery/:id/comments` | `{ comments: [comment] }` (맨 위 댓글만, 오래된 순, 최대 200) |
+| `GET /gallery/:id/comments?parent=<댓글 id>` | `{ comments: [comment] }` 그 댓글의 답글 (오래된 순, 최대 200) |
+| `POST /gallery/:id/comments` `{ body, parent? }` 🔒 | `{ comment }` (`parent` 가 있으면 답글, 아래 **답글**) |
+| `GET /items/:category/:id/comments?sort=new|top` | `{ comments: [comment] }` (맨 위 댓글만, 최대 200). `?parent=` 는 위와 같다 (정렬과 상관없이 오래된 순) |
+| `POST /items/:category/:id/comments` `{ body, parent? }` 🔒 | `{ comment }` |
 | `DELETE /comments/:id` 🔒 | 작성자나 관리자 (내용을 지우고 deleted = 1) |
 | `POST /comments/:id/like` `{ on: bool }` 🔒 | `{ likes, myLike }` |
 | `POST /report` `{ kind: 'post'|'comment'|'cup'|'image', id, reason? }` 🔒 | `{ ok }` (`cup` 은 사용자 월드컵, `image` 는 올린 이미지 — id 32자리 hex, 아래 **이미지 검열**) |
 
 `comment` = `{ id, body, author: { id, name, avatar }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
 (덧붙임: `hidden: bool`. 지운 댓글은 목록에 나오지 않는다. 본문은 원문 그대로 저장·반환하므로 화면에서 이스케이프한다.)
-— `vote` 는 항목 댓글에서 작성자가 그 항목에 낸 밸런스 표(없으면 null). 본문 1–500자, 1분에 5개까지.
+— `vote` 는 항목 댓글에서 작성자가 그 항목에 낸 밸런스 표(없으면 null). 본문 1–500자, 1분에 5개까지 (답글 포함).
+— 답글 필드 (0011): `parent: 맨 위 댓글 id | null`, `replyTo: { id, name } | null` (답글의 답글이면 그 답글 작성자 — 화면은 "@이름" 글자로 보인다),
+  맨 위 댓글에만 `replyCount` (보는 사람에게 보이는 답글 수).
+
+**답글** (YouTube 처럼 한 단계만):
+- `POST …/comments { body, parent }`: `parent` 는 같은 대상(글·항목·월드컵)의 지워지지 않고 보는 사람에게 보이는 댓글.
+  맨 위 댓글이면 그 밑에, 답글이면 그 답글의 맨 위 댓글 밑에 들어가고 `replyTo` = 그 답글 작성자. 맨 위 댓글도 지워지지 않았어야 한다.
+  형식이 틀리면 400 `parent`, 없음·다른 대상·지움·숨김이면 404 `{ error: 'not_found', reason: 'parent' }`. `parent: null` 은 맨 위 댓글.
+- 맨 위 목록은 답글을 싣지 않는다 — `replyCount` 를 보고 화면이 펼칠 때 `?parent=` 로 받는다.
+- 지웠거나 보는 사람에게 숨겨진 맨 위 댓글이라도 보이는 답글이 남아 있으면 자리를 남긴다:
+  `removed: 'deleted' | 'hidden'`, `body: ''`, `author: null`, `likes: 0` (답글이 없으면 지금처럼 빠진다).
+- 댓글 수(`post.comments`, `cup.comments`)는 답글을 포함한 보이는 댓글 수. 좋아요·삭제·신고는 맨 위 댓글과 같은 `/comments/:id*`, `/report`.
 
 ## 모두의 티어표 (play.js)
 
@@ -188,8 +202,8 @@ worldcup_stats(category, item, champ INTEGER DEFAULT 0, entries INTEGER DEFAULT 
 | `DELETE /cups/:id` 🔒 | 작성자나 관리자. 항목·좋아요·댓글(+댓글 좋아요·신고)·월드컵 신고를 같이 지운다. 올린 이미지는 남긴다. `{ ok: true }` |
 | `POST /cups/:id/play` `{ champion, entrants, matches, voter? }` | 한 판의 결과 → `{ ok: true }`. 아래 규칙. 로그인 상태면 계정, 아니면 익명 `voter`(형식은 `/balance` 와 같음, 저장하지는 않음). IP 당 1분 6판(`cupplay` 버킷). `plays + 1`, 출전 항목 `entries + 1`, 우승 항목 `champ + 1`, 경기마다 이긴 쪽 `wins + 1`·진 쪽 `losses + 1`, 그리고 **대진 크기 수치**(expected·progress·tracked·tracked_champ, 서버가 계산). |
 | `POST /cups/:id/like` 🔒 `{ on: bool }` | `{ likes, myLike }`. 사용자당 1분 60번. |
-| `GET /cups/:id/comments` | `{ comments: [comment] }` (오래된 순, 최대 200) — 갤러리 글 댓글과 같은 모양 |
-| `POST /cups/:id/comments` 🔒 `{ body }` | `{ comment }`. 본문 1–500자, 1분에 5개(모든 댓글 합산). 댓글 좋아요·삭제·신고는 기존 `/comments/:id/like`, `DELETE /comments/:id`, `POST /report { kind: 'comment' }`. |
+| `GET /cups/:id/comments` | `{ comments: [comment] }` (맨 위 댓글만, 오래된 순, 최대 200; `?parent=` 는 답글) — 갤러리 글 댓글과 같은 모양 |
+| `POST /cups/:id/comments` 🔒 `{ body, parent? }` | `{ comment }`. 본문 1–500자, 1분에 5개(모든 댓글 합산). 댓글 좋아요·삭제·신고는 기존 `/comments/:id/like`, `DELETE /comments/:id`, `POST /report { kind: 'comment' }`. |
 
 `cup` = `{ id, title, description, cover, itemCount, plays, likes, comments, author: { id, name, avatar }, created, sample, myLike: bool, hidden: bool, mine: bool }`
 - `sample` = 항목 이미지 참조 4개 (이미지 있는 항목 먼저, 항목 순서대로; 모자라면 `null` 로 채운다).
