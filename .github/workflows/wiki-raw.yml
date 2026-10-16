@@ -26,4 +26,4 @@ jobs:
           git add site/data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "data: 위키 데이터 갱신 (public-beta 그림)" && git push origin HEAD:fix/item-text
+          git commit -qm "data: 위키 데이터 갱신 (public-beta 그림) 2" && git push origin HEAD:fix/item-text
