@@ -1,6 +1,8 @@
 // Slay the Spire Wiki(slaythespire.wiki.gg)의 StS2 데이터 모듈을 읽어
 // site/data/sts2.json, site/data/keys.json 과 이미지(site/data/img/...)를 만든다.
 //
+// 기준 버전: 항상 public-beta. 위키 데이터 모듈은 public-beta 수치로 갱신되고, 카드 그림은 'Beta-<파일>' 이 있으면 그것을 쓴다.
+//
 // 사용: node tools/fetch-data.mjs            (전체, 이미 받은 이미지는 sha1 이 같으면 건너뜀)
 //       node tools/fetch-data.mjs --no-images (데이터만)
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
@@ -52,8 +54,6 @@ const WORDS = Object.fromEntries(ACTIVE.map(lang => [lang, Object.fromEntries(['
 const stats = Object.fromEntries(ACTIVE.map(lang => [lang, { total: 0, name: 0, text: 0 }]));
 // 점검용: L10N_AUDIT=<파일> 이면 번역 재료(틀·위키 문구·읽은 값)를 그 파일에 남긴다
 const AUDIT = process.env.L10N_AUDIT ? [] : null;
-// 위키와 게임 언어 파일의 효과가 뜻까지 다른 항목 (게임 버전 차이). 어느 쪽이 맞는지 확인 전까지는 번역 효과를 넣지 않는다.
-const TEXT_DIFFERS = new Set(['guiding star', 'abundance', 'expect a fight']);
 // 게임에 따로 없는 묶음 이름
 const SHARED_NAMES = {
   en: { shared: 'Shared', colorless: 'Colorless' },
@@ -98,7 +98,7 @@ function localize(lang, table, enName, wikiText, { keywords = false, upgradable 
     const split = keywords ? splitKeywords(wikiText) : { text: wikiText, keywords: [] };
     // 문장이 딱 맞지 않으면(위키가 조금 다르게 적은 경우) 수치를 차례대로 짝짓는다
     const exact = alignValues(e.en, split.text);
-    const vals = exact ?? (TEXT_DIFFERS.has(lc(enName)) ? null : looseValues(e.en, split.text));
+    const vals = exact ?? looseValues(e.en, split.text);
     AUDIT?.push({ lang, table, enName, wiki: split.text, keywords: split.keywords, en: e.en, tr: e.tr, vals, loose: !exact && Boolean(vals) });
     if (vals) {
       try {
@@ -181,7 +181,8 @@ export function formatText(raw, mode = 'both') {
     // 위키 틀: {{QueryLink|Cards|type:Attack|Attacks|2}} → Attacks, {{KW|Osty|Osty's|2}} → Osty's (키워드는 굵게, 아래에서 $ 표시로)
     .replace(/\{\{([^{}]*)\}\}/g, (m, body) => (/^KW2?\|/.test(body) ? '$' : '') + wikiTemplate(m, body))
     .replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1')
-    .replace(/'''?/g, '');
+    .replace(/'''?/g, '')
+    .replace(/@([A-Z][a-z]+)/g, '$1'); // @Gold → Gold (아이콘 이름)
   s = escapeHtml(s);
   s = s.replace(/\[([^\[\]|]*)\|([^\[\]|]*)\]/g, (_, a, b) => {
     if (mode === 'up') return b ? `<span class="up">${b}</span>` : '';
@@ -330,11 +331,28 @@ async function runImageJobs() {
 
 const CARD_RARITIES = ['Common', 'Uncommon', 'Rare', 'Ancient', 'Event'];
 
+// 위키 데이터가 아직 public-beta 를 따라가지 못한 카드 (sts2.untapped.gg 의 v0.111.0 베타 문구로 2026-10-16 확인).
+// 위키가 고쳐져 값이 같아지면 로그로 알려 준다 — 그때 여기서 지우면 된다.
+const BETA_FIXES = {
+  'Juggernaut': { Text: 'Whenever you gain $Block, deal [6|8] damage to a random enemy.' },
+  'Brightest Flame': { Text: 'Gain [@CE@CE|@CE@CE@CE].<br>Draw [2|3] cards.<br>Lose 2 Max HP.' },
+  'Expect a Fight': { Cost: 3, CostPlus: undefined, Text: 'Gain [15|16] $Block.<br>Gains [5|8] additional $Block for each $Strength you have.' },
+  'Guiding Star': { StarCost: 1, Text: 'Deal [12|13] damage.<br>Next turn, draw [2|3] cards.' },
+  'Abundance': { CostPlus: 0, Text: 'Choose 1 of 3 Upgraded Powers to add into your Hand. It\'s free to play this turn.<br>$Exhaust.' },
+};
+function betaFix(name, c) {
+  const fix = BETA_FIXES[name];
+  if (!fix) return c;
+  if (Object.entries(fix).every(([k, v]) => c[k] === v)) console.log(`  위키가 public-beta 를 반영함 — BETA_FIXES 에서 '${name}' 를 지워도 된다`);
+  return { ...c, ...fix };
+}
+
 async function cards() {
   const items = [];
   for (const group of [...CHARACTERS.map(c => c.en), 'Colorless']) {
     const data = await module(`Module:Cards/StS2 data/${group}`);
-    for (const [name, c] of Object.entries(data)) {
+    for (const [name, raw] of Object.entries(data)) {
+      const c = betaFix(name, raw);
       if (!CARD_RARITIES.includes(c.Rarity)) continue;
       if (c.Multiplayer && String(c.Multiplayer).toLowerCase() !== 'no') continue;
       const ch = charByEn.get(c.Color);
