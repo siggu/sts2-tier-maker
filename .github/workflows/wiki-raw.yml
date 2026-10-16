@@ -13,10 +13,10 @@ jobs:
         with:
           node-version: 22
       - name: untapped 상세 페이지 받기
-        run: node tools-tmp/scrape.mjs
+        run: node tools-tmp/pages.mjs
       - name: 커밋
         run: |
           git add raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "untapped 항목 문구 (임시)" && git push
+          git commit -qm "untapped 상세 문구 (임시)" && git push
