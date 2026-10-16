@@ -1,4 +1,4 @@
-// 댓글 답글(대댓글): 한 단계만, 답글의 답글은 같은 맨 위 댓글 밑으로 (replyTo = 그 답글 작성자).
+// 댓글 답글(대댓글): YouTube 처럼 3단계까지. 답글의 답글은 그 답글 밑 3단계(under), 3단계에 단 답글은 같은 3단계에 (replyTo = 받는 사람).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleAccount } from '../src/account.js';
@@ -53,16 +53,20 @@ test('답글: 쓰기·목록·답글의 답글·잘못된 부모·지운 부모 
   const r1 = (await write(B, '답글입니다', t1.id)).data.comment;
   assert.deepEqual([r1.parent, r1.replyTo, r1.mine, 'replyCount' in r1], [t1.id, null, true, false]);
 
-  // 답글의 답글 → 같은 맨 위 댓글 밑, replyTo = 그 답글 작성자
+  // 답글의 답글 → 그 답글 밑 3단계 (같은 스레드)
   const r2 = (await write(C, '동의해요', r1.id)).data.comment;
-  assert.equal(r2.parent, t1.id);
-  assert.deepEqual(r2.replyTo, { id: bob.user.id, name: '밥돌이' });
+  assert.deepEqual([r2.parent, r2.under, r2.replyTo], [t1.id, r1.id, null]);
+  assert.deepEqual([r1.under, t1.under], [null, null]);
+  // 3단계 답글에 단 답글 → 더 깊어지지 않고 같은 2단계 밑 3단계, replyTo = 받는 사람 ("@캐럴")
+  const r2b = (await write(A, '저도요', r2.id)).data.comment;
+  assert.deepEqual([r2b.parent, r2b.under, r2b.replyTo], [t1.id, r1.id, { id: carol.user.id, name: '캐럴' }]);
+  assert.equal((await call('DELETE', `/comments/${r2b.id}`, { token: A })).data.ok, true);
 
   // 목록: 맨 위 댓글만 + replyCount. ?parent= 는 답글을 오래된 순으로
   let list = await top(A);
   assert.deepEqual(list.map(c => [c.id, c.replyCount, c.parent]), [[t1.id, 2, null], [t2.id, 0, null]]);
   let replies = await thread(t1.id, A);
-  assert.deepEqual(replies.map(c => [c.id, c.parent, c.replyTo?.name ?? null]), [[r1.id, t1.id, null], [r2.id, t1.id, '밥돌이']]);
+  assert.deepEqual(replies.map(c => [c.id, c.parent, c.under]), [[r1.id, t1.id, null], [r2.id, t1.id, r1.id]]);
   assert.deepEqual(await thread(t2.id), []);
   assert.equal((await call('GET', `${P}?parent=nope`)).data.reason, 'parent');
   // 다른 글의 댓글 id 로는 이 글의 답글이 나오지 않는다
@@ -135,6 +139,25 @@ test('답글: 쓰기·목록·답글의 답글·잘못된 부모·지운 부모 
   const seenByC = (await top(C)).find(c => c.id === t3.id);
   assert.deepEqual([seenByC.removed, seenByC.body, seenByC.hidden], [undefined, '신고될 댓글', true]);
   assert.equal((await top(ADM)).find(c => c.id === t3.id).body, '신고될 댓글');
+
+  // 지운 2단계 답글도 밑에 3단계 답글이 남아 있으면 자리만 남고, 마지막 3단계 답글까지 지우면 사라진다
+  resetLimits();
+  const t4 = (await write(A, '셋째 스레드')).data.comment;
+  const q1 = (await write(B, '2단계', t4.id)).data.comment;
+  const q2 = (await write(C, '3단계', q1.id)).data.comment;
+  assert.equal((await call('DELETE', `/comments/${q1.id}`, { token: B })).data.ok, true);
+  let qs = await thread(t4.id, A);
+  assert.deepEqual(qs.map(c => [c.id, c.removed ?? null, c.author, c.under]), [[q1.id, 'deleted', null, null], [q2.id, null, qs[1].author, q1.id]]);
+  assert.equal(qs[1].author.name, '캐럴');
+  assert.equal((await top(A)).find(c => c.id === t4.id).replyCount, 1);
+  // 지운 2단계 답글에는 답글을 달 수 없지만, 그 밑 3단계 답글에는 된다 (같은 자리에, @받는 사람)
+  assert.equal((await write(A, 'x', q1.id)).status, 404);
+  const q3 = (await write(A, '이어서', q2.id)).data.comment;
+  assert.deepEqual([q3.under, q3.replyTo?.name], [q1.id, '캐럴']);
+  await call('DELETE', `/comments/${q3.id}`, { token: A });
+  assert.equal((await call('DELETE', `/comments/${q2.id}`, { token: C })).data.ok, true);
+  assert.deepEqual(await thread(t4.id, A), []);
+  assert.equal((await top(A)).find(c => c.id === t4.id).replyCount, 0);
 
   // 항목 댓글: 답글에도 작성자의 밸런스 표, 공감순은 맨 위 댓글끼리만
   resetLimits();

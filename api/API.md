@@ -30,7 +30,7 @@
 | `migrations/0005_cups.sql` | cups, cup_items, cup_likes, images (사용자 월드컵) |
 | `migrations/0006_bracket_stats.sql` | worldcup_stats·cup_items 에 expected, progress, tracked, tracked_champ |
 | `migrations/0007_image_moderation.sql` | images 에 status, reports, ai, purpose, reviewed_by, reviewed_at; image_blocklist |
-| `migrations/0011_comment_replies.sql` | comments 에 parent_id, reply_to (답글) |
+| `migrations/0011_comment_replies.sql` | comments 에 parent_id, under_id, reply_to (답글 3단계) |
 
 `handleAccount` / `handlePlay` / `handleCups` / `handleAdmin` 은 자기 경로가 아니면 `null` 을 돌려준다. 응답에는 받은 `cors` 헤더를 붙인다.
 
@@ -56,7 +56,7 @@ reactions(post_id, user_id, v INTEGER, PRIMARY KEY(post_id, user_id))          -
 comments(id TEXT PK, target TEXT, user_id, body TEXT, created INTEGER,
          likes INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, deleted INTEGER DEFAULT 0)
          -- target: 'post:<postId>' 또는 'item:<카테고리/아이템id>'
-         -- (0011) parent_id TEXT: NULL = 맨 위 댓글, 아니면 그 맨 위 댓글 id (답글). reply_to TEXT: 답글의 답글이면 그 답글 작성자 users.id
+         -- (0011) parent_id TEXT: NULL = 맨 위 댓글, 아니면 그 맨 위 댓글 id (답글). under_id TEXT: 3단계 답글이면 그 위의 2단계 답글. reply_to TEXT: 3단계 답글에 단 답글이면 받는 사람 users.id
 comment_likes(comment_id, user_id, PRIMARY KEY(comment_id, user_id))
 reports(kind TEXT, target_id TEXT, user_id TEXT, reason TEXT, created INTEGER, PRIMARY KEY(kind, target_id, user_id))
 ```
@@ -127,16 +127,21 @@ JWT 검증: 헤더 `alg: RS256`, Google JWKS(`https://www.googleapis.com/oauth2/
 `comment` = `{ id, body, author: { id, name, avatar }, created, likes, myLike: bool, mine: bool, vote: 'nerf'|'fair'|'buff'|null }`
 (덧붙임: `hidden: bool`. 지운 댓글은 목록에 나오지 않는다. 본문은 원문 그대로 저장·반환하므로 화면에서 이스케이프한다.)
 — `vote` 는 항목 댓글에서 작성자가 그 항목에 낸 밸런스 표(없으면 null). 본문 1–500자, 1분에 5개까지 (답글 포함).
-— 답글 필드 (0011): `parent: 맨 위 댓글 id | null`, `replyTo: { id, name } | null` (답글의 답글이면 그 답글 작성자 — 화면은 "@이름" 글자로 보인다),
-  맨 위 댓글에만 `replyCount` (보는 사람에게 보이는 답글 수).
+— 답글 필드 (0011): `parent: 맨 위 댓글 id | null`, `under: 2단계 답글 id | null` (3단계 답글이면 그 위의 2단계 답글),
+  `replyTo: { id, name } | null` (3단계 답글에 단 답글이면 받는 사람 — 화면은 "@이름" 글자로 보인다),
+  맨 위 댓글에만 `replyCount` (보는 사람에게 보이는 답글 수, 2·3단계 모두).
 
-**답글** (YouTube 처럼 한 단계만):
+**답글** (YouTube 처럼 3단계까지: 맨 위 댓글 → 답글 → 답글의 답글. 더 깊게는 들어가지 않는다):
 - `POST …/comments { body, parent }`: `parent` 는 같은 대상(글·항목·월드컵)의 지워지지 않고 보는 사람에게 보이는 댓글.
-  맨 위 댓글이면 그 밑에, 답글이면 그 답글의 맨 위 댓글 밑에 들어가고 `replyTo` = 그 답글 작성자. 맨 위 댓글도 지워지지 않았어야 한다.
+  - 맨 위 댓글 → 그 밑의 2단계 답글 (`under: null`, `replyTo: null`)
+  - 2단계 답글 → 그 밑의 3단계 답글 (`under` = 그 답글, `replyTo: null`)
+  - 3단계 답글 → 같은 3단계에 들어간다 (`under` = 같은 2단계 답글, `replyTo` = 받는 사람)
+
+  맨 위 댓글은 지워지지 않고 보여야 한다 (2단계 답글이 지워졌어도 그 밑 3단계 답글에는 답글을 달 수 있다).
   형식이 틀리면 400 `parent`, 없음·다른 대상·지움·숨김이면 404 `{ error: 'not_found', reason: 'parent' }`. `parent: null` 은 맨 위 댓글.
-- 맨 위 목록은 답글을 싣지 않는다 — `replyCount` 를 보고 화면이 펼칠 때 `?parent=` 로 받는다.
-- 지웠거나 보는 사람에게 숨겨진 맨 위 댓글이라도 보이는 답글이 남아 있으면 자리를 남긴다:
-  `removed: 'deleted' | 'hidden'`, `body: ''`, `author: null`, `likes: 0` (답글이 없으면 지금처럼 빠진다).
+- 맨 위 목록은 답글을 싣지 않는다 — `replyCount` 를 보고 화면이 펼칠 때 `?parent=` 로 그 스레드의 답글(2·3단계)을 한꺼번에 받고 `under` 로 묶는다.
+- 지웠거나 보는 사람에게 숨겨진 맨 위 댓글·2단계 답글이라도 그 밑에 보이는 답글이 남아 있으면 자리를 남긴다:
+  `removed: 'deleted' | 'hidden'`, `body: ''`, `author: null`, `likes: 0` (밑에 답글이 없으면 지금처럼 빠진다).
 - 댓글 수(`post.comments`, `cup.comments`)는 답글을 포함한 보이는 댓글 수. 좋아요·삭제·신고는 맨 위 댓글과 같은 `/comments/:id*`, `/report`.
 
 ## 모두의 티어표 (play.js)

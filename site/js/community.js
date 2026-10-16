@@ -918,11 +918,12 @@ export async function reportDialog(kind, id, postKind = 'tier', lead = null) {
 
 // listPath: 목록 GET, postPath: 쓰기 POST. verdicts 가 있으면 작성자의 밸런스 표 배지를 단다.
 // (사용자 월드컵 cups.js 도 쓴다)
-// 답글(대댓글)은 YouTube 처럼 한 단계만: 맨 위 댓글 밑에 접혀 있고 "답글 N개 보기" 로 펼친다 (그때 ?parent= 로 받는다).
-// 답글에 답글을 달아도 같은 맨 위 댓글 밑으로 들어가고, 받는 사람은 "@이름" 글자로 보인다 (API.md 답글).
+// 답글(대댓글)은 YouTube 처럼 3단계까지: 맨 위 댓글 → 답글 → 답글의 답글. 들여쓰기는 두 번까지만 늘고,
+// 3단계 답글에 다시 답글을 달면 같은 3단계에 "@이름" 을 붙여 들어간다 (API.md 답글).
+// 답글은 접혀 있다가 "답글 N개" 로 펼칠 때 스레드째 ?parent= 로 받아 under 로 묶는다. 왼쪽 연결선을 누르면 다시 접힌다.
 export function commentsSection({ listPath, postPath, verdicts = null, sortable = false, formFirst = false, count = null, onCount, lazy = false }) {
   let sort = 'new';
-  let comments = []; // 맨 위 댓글. 답글은 c.replies(펼칠 때 받는다), 펼침은 c.open
+  let comments = []; // 맨 위 댓글. 그 스레드의 답글(2·3단계)은 c.replies(펼칠 때 받는다), 펼침은 c.open (2단계 답글도)
   let loaded = false;
   let replying = null; // 열린 답글 칸 (한 번에 하나): { root, to, form, ta }
   const topEls = new WeakMap(); // 맨 위 댓글 → 그 li (답글까지 함께 다시 그린다)
@@ -975,18 +976,33 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
     if (li) fillRow(li, root, null);
   }
 
-  // 댓글 한 줄. root 가 있으면 그 맨 위 댓글의 답글.
+  // 맨 위 댓글(root) 스레드에서 c 바로 밑의 답글: root 밑은 2단계(under 없음), 2단계 답글 밑은 under 가 그 답글인 3단계
+  function childrenOf(root, c) {
+    const all = root.replies || [];
+    return c === root ? all.filter(r => !r.under) : all.filter(r => r.under === c.id);
+  }
+
+  // 댓글 한 줄. root 가 있으면 그 맨 위 댓글의 답글 (c.under 가 있으면 3단계).
+  // 줄 = [프로필 사진 + 연결선] [본문] / [ ] [답글 N개] / [ ] [펼친 답글] — 들여쓰기는 펼친 답글 목록에서만 생긴다.
   function fillRow(li, c, root) {
     const deleted = isDeleted(c);
     const mine = !deleted && (c.mine || isMine(c.author));
+    const level = !root ? 1 : c.under ? 3 : 2;
     li.className = `cmt${root ? ' cmt-reply' : ''}${deleted ? ' deleted' : ''}${mine ? ' mine' : ''}`;
     li.dataset.id = c.id;
     const v = verdicts && !deleted && c.vote ? verdicts.find(x => x.v === c.vote) : null;
-    // 지운(또는 가려진) 맨 위 댓글과 그 답글에는 답글을 달 수 없다 (서버도 막는다)
+    // 지운(또는 가려진) 댓글과, 지운 맨 위 댓글 밑에는 답글을 달 수 없다 (서버도 막는다)
     const canReply = !deleted && !(root && isDeleted(root));
     const placeholder = c.removed === 'hidden' ? t('comments.hiddenPlaceholder') : t('comments.deleted');
+    const thread = level < 3 ? threadParts(c, root || c) : null;
     li.replaceChildren(...[
-      deleted && !c.author ? h('span', { class: 'acct-av cmt-av-gone', 'aria-hidden': 'true' }) : avatar(c.author),
+      h('div', { class: 'cmt-avcol' },
+        deleted && !c.author ? h('span', { class: 'acct-av cmt-av-gone', 'aria-hidden': 'true' }) : avatar(c.author),
+        // 펼친 답글로 이어지는 선. 누르면 접힌다 (같은 일을 하는 "답글 숨기기" 단추가 있어 키보드 순서에서는 뺀다)
+        thread?.open && h('button', {
+          type: 'button', class: 'cmt-rail', tabindex: '-1', 'aria-hidden': 'true', title: t('comments.hideReplies'),
+          onclick: () => toggleThread(c, root || c),
+        })),
       h('div', { class: 'cmt-main' },
         !deleted && h('div', { class: 'cmt-meta' },
           h('b', { class: 'cmt-name' }, c.author?.name || '?'),
@@ -1011,23 +1027,27 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
           !mine && h('button', { type: 'button', class: 'cmt-act', onclick: () => reportDialog('comment', c.id) }, icon('flag'), t('acct.report')),
         ),
         replying?.to === c && replying.form,
-        !root && threadEl(c),
       ),
+      thread?.toggle,
+      thread?.list,
     ].filter(Boolean));
   }
 
-  // 맨 위 댓글 밑의 "답글 N개 보기 / 답글 숨기기" 와 펼친 답글 목록
-  function threadEl(root) {
-    const n = root.replyCount || 0;
-    if (!n && !root.replies?.length) return null;
+  // c(맨 위 댓글 또는 2단계 답글) 밑의 "답글 N개 / 답글 숨기기" 단추와 펼친 답글 목록
+  function threadParts(c, root) {
+    const top = c === root;
+    const kids = top ? null : childrenOf(root, c);
+    const n = top ? root.replyCount || 0 : kids.filter(r => !isDeleted(r)).length;
+    if (top ? !n && !root.replies?.length : !kids.length) return null;
+    const open = Boolean(c.open);
     const toggle = h('button', {
-      type: 'button', class: 'cmt-thread-toggle', 'aria-expanded': String(Boolean(root.open)),
-      onclick: () => toggleThread(root),
-    }, icon('caret'), root.open ? t('comments.hideReplies') : t('comments.showReplies', { n }));
-    if (!root.open) return h('div', { class: 'cmt-thread' }, toggle);
+      type: 'button', class: 'cmt-thread-toggle', 'aria-expanded': String(open),
+      onclick: () => toggleThread(c, root),
+    }, icon('caret'), open ? t('comments.hideReplies') : t('comments.showReplies', { n }));
+    if (!open) return { open, toggle };
     let items;
-    if (root.replies) {
-      items = root.replies.map(r => {
+    if (!top || root.replies) {
+      items = (kids || childrenOf(root, root)).map(r => {
         const li = h('li');
         fillRow(li, r, root);
         return li;
@@ -1038,14 +1058,18 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
     } else {
       items = [h('li', { class: 'cmt-note' }, t('comments.repliesLoading'))];
     }
-    return h('div', { class: 'cmt-thread' }, toggle, h('ol', { class: 'cmt-replies' }, items));
+    return { open, toggle, list: h('ol', { class: 'cmt-replies' }, items) };
   }
 
-  function toggleThread(root) {
-    root.open = !root.open;
-    if (!root.open && replying && replying.root === root && replying.to !== root) replying = null; // 접힌 답글의 답글 칸은 닫는다
+  function toggleThread(c, root) {
+    c.open = !c.open;
+    // 접힌 답글에 열려 있던 답글 칸은 닫는다
+    if (!c.open && replying && replying.root === root && replying.to !== c) {
+      const to = replying.to;
+      if (c === root ? to !== root : to.under === c.id) replying = null;
+    }
     drawTop(root);
-    if (root.open && !root.replies) loadReplies(root);
+    if (c === root && c.open && !c.replies) loadReplies(root);
   }
 
   async function loadReplies(root) {
@@ -1054,7 +1078,7 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
     try {
       const data = await api(`${listPath}?parent=${enc(root.id)}`);
       root.replies = Array.isArray(data?.comments) ? data.comments : [];
-      root.replyCount = root.replies.length;
+      root.replyCount = root.replies.filter(r => !isDeleted(r)).length;
       setCount();
     } catch {
       root.repliesFailed = true;
@@ -1070,7 +1094,8 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
     const prev = replying;
     const { form, ta } = composer({
       reply: true,
-      lead: to !== root && to.author ? h('span', { class: 'cmt-mention' }, `@${to.author.name || '?'}`) : null,
+      // 3단계 답글에 다는 답글은 같은 3단계에 "@이름" 을 붙여 들어간다
+      lead: to.under && to.author ? h('span', { class: 'cmt-mention' }, `@${to.author.name || '?'}`) : null,
       label: t('comments.replyTo', { name: to.author?.name || '?' }),
       placeholder: t('comments.replyPlaceholder'),
       sendLabel: t('comments.reply'),
@@ -1104,10 +1129,13 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
       c.mine = true;
       root.replies.push(c);
       root.replyCount = (root.replyCount || 0) + 1;
-      drawTop(root);
     } else {
       await loadReplies(root); // 처음 펼침: 방금 쓴 답글까지 받는다
     }
+    // 3단계에 들어갔으면 그 2단계 답글도 펼친다
+    const up = c?.under && root.replies?.find(r => r.id === c.under);
+    if (up) up.open = true;
+    drawTop(root);
     setCount();
     const el = c && topEls.get(root)?.querySelector(`.cmt-reply[data-id="${c.id}"]`);
     if (el) {
@@ -1141,19 +1169,26 @@ export function commentsSection({ listPath, postPath, verdicts = null, sortable 
 
   // root 가 있으면 답글 지우기
   async function remove(c, root) {
-    const keeps = !root && c.replyCount > 0;
+    // 밑에 답글이 남는 맨 위 댓글·2단계 답글은 "삭제된 댓글입니다" 자리를 남긴다 (서버도 같다)
+    const keeps = root
+      ? !c.under && childrenOf(root, c).some(r => !isDeleted(r))
+      : c.replyCount > 0;
     if (!confirm(t(keeps ? 'comments.deleteKeepsReplies' : 'comments.deleteConfirm'))) return;
     try {
       await api(`/comments/${enc(c.id)}`, { method: 'DELETE' });
       if (replying && (replying.to === c || (!root && replying.root === c))) replying = null;
+      if (keeps) Object.assign(c, { body: '', author: null, removed: 'deleted', likes: 0, myLike: false, mine: false, vote: null });
       if (root) {
-        root.replies = (root.replies || []).filter(x => x !== c);
         root.replyCount = Math.max(0, (root.replyCount || 0) - 1);
-        // 지운 맨 위 댓글은 마지막 답글이 사라지면 자리도 뺀다
+        if (!keeps) {
+          root.replies = (root.replies || []).filter(x => x !== c);
+          // 지운 2단계 답글은 밑의 마지막 답글이 사라지면 자리도 뺀다
+          const up = c.under && root.replies.find(x => x.id === c.under);
+          if (up && isDeleted(up) && !childrenOf(root, up).length) root.replies = root.replies.filter(x => x !== up);
+        }
+        // 지운 맨 위 댓글도 마지막 답글이 사라지면 자리를 뺀다
         if (isDeleted(root) && !root.replyCount) { comments = comments.filter(x => x !== root); drawList(); } else drawTop(root);
       } else if (keeps) {
-        // 답글이 있으면 "삭제된 댓글입니다" 자리를 남긴다 (서버도 같다)
-        Object.assign(c, { body: '', author: null, removed: 'deleted', likes: 0, myLike: false, mine: false, vote: null });
         drawTop(c);
       } else {
         comments = comments.filter(x => x !== c);

@@ -481,9 +481,10 @@ function recountComments(env, target) {
   ).bind(target.slice(i + 1), target);
 }
 
-// 답글(대댓글)은 한 단계만: parent 는 맨 위 댓글 id, replyTo 는 답글의 답글일 때 그 답글 작성자.
-// 지워졌거나(deleted) 보는 사람에게 숨겨진(hidden) 맨 위 댓글은 보이는 답글이 남아 있으면 내용·작성자 없이
-// 자리만 남긴다 (removed: 'deleted' | 'hidden'). 답글이 없으면 지금처럼 목록에서 빠진다.
+// 답글(대댓글)은 YouTube 처럼 3단계까지: parent = 스레드의 맨 위 댓글 id, under = 3단계면 그 위 2단계 답글 id,
+// replyTo = 3단계 답글에 단 답글(같은 3단계에 들어간다)이면 받는 사람.
+// 지워졌거나(deleted) 보는 사람에게 숨겨진(hidden) 맨 위 댓글·2단계 답글은 그 밑에 보이는 답글이 남아 있으면
+// 내용·작성자 없이 자리만 남긴다 (removed: 'deleted' | 'hidden'). 밑에 답글이 없으면 지금처럼 목록에서 빠진다.
 function commentOut(r, user) {
   const removed = r.deleted ? 'deleted' : r.hidden && !canSee(r, user) ? 'hidden' : null;
   const out = {
@@ -497,6 +498,7 @@ function commentOut(r, user) {
     vote: removed ? null : VOTE_NAMES[r.vote] ?? null,
     hidden: Boolean(r.hidden),
     parent: r.parent_id ?? null,
+    under: r.under_id ?? null,
     replyTo: r.r_id ? { id: r.r_id, name: r.r_name } : null,
   };
   if (removed) out.removed = removed;
@@ -504,7 +506,8 @@ function commentOut(r, user) {
   return out;
 }
 
-// 목록: 맨 위 댓글(order 순, 최대 200)과 각각의 replyCount. ?parent=<맨 위 댓글 id> 면 그 답글들(오래된 순, 최대 200).
+// 목록: 맨 위 댓글(order 순, 최대 200)과 각각의 replyCount(2·3단계 합). ?parent=<맨 위 댓글 id> 면 그 스레드의 답글 전부
+// (2·3단계, 오래된 순, 최대 200 — 화면이 under 로 묶는다).
 // item 이 있으면 작성자가 그 항목에 낸 밸런스 표(vote)를 같이 읽는다. cups.js 도 쓴다.
 export async function listComments(c, target, { item = null, order }) {
   const me = c.user?.id ?? '';
@@ -513,11 +516,12 @@ export async function listComments(c, target, { item = null, order }) {
   // 보는 사람에게 보이는 댓글 (관리자는 숨김도 본다). x 는 표 별칭.
   const visible = x => (c.user?.admin ? '' : `AND (${x}.hidden = 0 OR ${x}.user_id = ?3)`);
   const where = parent
-    ? `c.parent_id = ?4 AND c.deleted = 0 ${visible('c')}`
+    ? `c.parent_id = ?4 AND ((c.deleted = 0 ${visible('c')})
+         OR (c.under_id IS NULL AND EXISTS (SELECT 1 FROM comments k WHERE k.under_id = c.id AND k.deleted = 0 ${visible('k')})))`
     : `c.parent_id IS NULL AND ((c.deleted = 0 ${visible('c')})
          OR EXISTS (SELECT 1 FROM comments r WHERE r.parent_id = c.id AND r.deleted = 0 ${visible('r')}))`;
   const { results } = await c.env.DB.prepare(
-    `SELECT c.id, c.body, c.user_id, c.created, c.likes, c.hidden, c.deleted, c.parent_id,
+    `SELECT c.id, c.body, c.user_id, c.created, c.likes, c.hidden, c.deleted, c.parent_id, c.under_id,
        u.name AS a_name, u.avatar AS a_avatar, ru.id AS r_id, ru.name AS r_name,
        EXISTS (SELECT 1 FROM comment_likes l WHERE l.comment_id = c.id AND l.user_id = ?3) AS my_like,
        ${item ? 'bv.v' : 'NULL'} AS vote,
@@ -531,17 +535,19 @@ export async function listComments(c, target, { item = null, order }) {
   return c.send({ comments: results.map(r => commentOut(r, c.user)) });
 }
 
-// 답글을 달 댓글 → { parentId, replyTo } | null (없음·다른 대상·지움·안 보임).
-// 답글에 답글을 달면 그 답글의 맨 위 댓글 밑으로 들어가고 replyTo 는 그 답글 작성자. 맨 위 댓글도 살아 있어야 한다.
+// 답글을 달 댓글 → { parentId, underId, replyTo } | null (없음·다른 대상·지움·안 보임).
+//  맨 위 댓글에 → 2단계 / 2단계 답글에 → 그 밑 3단계 / 3단계 답글에 → 같은 2단계 밑 3단계(더 깊어지지 않음) + replyTo.
+// 스레드의 맨 위 댓글도 살아 있어야 한다.
 async function replyTarget(c, target, id) {
-  const pick = 'SELECT c.id, c.target, c.user_id, c.hidden, c.deleted, c.parent_id, u.name FROM comments c JOIN users u ON u.id = c.user_id WHERE c.id = ?1';
+  const pick = 'SELECT c.id, c.target, c.user_id, c.hidden, c.deleted, c.parent_id, c.under_id, u.name FROM comments c JOIN users u ON u.id = c.user_id WHERE c.id = ?1';
   const ok = row => row && row.target === target && !row.deleted && canSee(row, c.user);
   const row = await c.env.DB.prepare(pick).bind(id).first();
   if (!ok(row)) return null;
-  if (!row.parent_id) return { parentId: row.id, replyTo: null };
+  if (!row.parent_id) return { parentId: row.id, underId: null, replyTo: null };
   const top = await c.env.DB.prepare(pick).bind(row.parent_id).first();
   if (!ok(top) || top.parent_id) return null;
-  return { parentId: top.id, replyTo: { id: row.user_id, name: row.name } };
+  if (!row.under_id) return { parentId: top.id, underId: row.id, replyTo: null };
+  return { parentId: top.id, underId: row.under_id, replyTo: { id: row.user_id, name: row.name } };
 }
 
 // body.parent 가 있으면 답글. 속도 제한은 댓글과 같은 'comment' 버킷.
@@ -552,7 +558,7 @@ export async function addComment(c, target, item = null) {
   if (res) return res;
   const text = cleanComment(body.body);
   if (!text) return bad(c, 'body');
-  let reply = { parentId: null, replyTo: null };
+  let reply = { parentId: null, underId: null, replyTo: null };
   if (body.parent !== undefined && body.parent !== null) {
     if (typeof body.parent !== 'string' || !ID_RE.test(body.parent)) return bad(c, 'parent');
     reply = await replyTarget(c, target, body.parent);
@@ -562,8 +568,8 @@ export async function addComment(c, target, item = null) {
   const id = randomHex(12);
   const now = Date.now();
   const stmts = [
-    env.DB.prepare('INSERT INTO comments (id, target, user_id, body, created, parent_id, reply_to) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
-      .bind(id, target, user.id, text, now, reply.parentId, reply.replyTo?.id ?? null),
+    env.DB.prepare('INSERT INTO comments (id, target, user_id, body, created, parent_id, under_id, reply_to) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)')
+      .bind(id, target, user.id, text, now, reply.parentId, reply.underId, reply.replyTo?.id ?? null),
   ];
   const recount = recountComments(env, target);
   if (recount) stmts.push(recount);
@@ -576,7 +582,7 @@ export async function addComment(c, target, item = null) {
   }
   const row = {
     id, body: text, user_id: user.id, a_name: user.name, a_avatar: user.avatar, created: now, likes: 0, my_like: 0, vote, hidden: 0,
-    parent_id: reply.parentId, r_id: reply.replyTo?.id, r_name: reply.replyTo?.name, reply_count: 0,
+    parent_id: reply.parentId, under_id: reply.underId, r_id: reply.replyTo?.id, r_name: reply.replyTo?.name, reply_count: 0,
   };
   return c.send({ comment: commentOut(row, user) });
 }

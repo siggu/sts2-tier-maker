@@ -383,7 +383,7 @@ test('사용자 월드컵 흐름', { skip: !DB && 'node:sqlite 없음' }, async 
   const c1 = (await call('POST', `/cups/${cup.id}/comments`, { token: B, body: { body: '재밌다' } })).data.comment;
   assert.deepEqual({ ...c1, id: 0, created: 0 }, {
     id: 0, body: '재밌다', author: { id: bob.user.id, name: 'Bob', avatar: avatarOf(null, bob.user.id) }, created: 0,
-    likes: 0, myLike: false, mine: true, vote: null, hidden: false, parent: null, replyTo: null, replyCount: 0,
+    likes: 0, myLike: false, mine: true, vote: null, hidden: false, parent: null, under: null, replyTo: null, replyCount: 0,
   });
   const c2 = (await call('POST', `/cups/${cup.id}/comments`, { token: A, body: { body: '고마워요' } })).data.comment;
   r = await call('GET', `/cups/${cup.id}/comments`, { token: A });
