@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'tools/build-seo.mjs'
+      - 'tools/redirect-page.html'
       - '.github/workflows/pages.yml'
   # 데이터 갱신 워크플로가 GITHUB_TOKEN 으로 커밋하면 push 이벤트가 생기지 않으므로 이어서 실행한다.
   workflow_run:
@@ -61,6 +63,8 @@ jobs:
           node-version: 22
       - name: 캐시 무효화용 버전 붙이기
         run: tools/stamp-version.sh site "${GITHUB_SHA::8}"
+      - name: 검색용 페이지·sitemap.xml·robots.txt 만들기
+        run: node tools/build-seo.mjs site "${GITHUB_SHA::8}"
       - name: Cloudflare Pages 배포
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then

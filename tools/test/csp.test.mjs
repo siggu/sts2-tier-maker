@@ -54,7 +54,11 @@ test('script-src 는 인라인 스크립트·eval 을 열지 않는다', () => {
 });
 
 test('index.html 에 인라인 스크립트·이벤트 속성이 없다 (CSP 가 막는다)', () => {
-  for (const m of markup.matchAll(/<script\b([^>]*)>/g)) assert.match(m[1], /\ssrc=/, `인라인 스크립트: ${m[0]}`);
+  // 구조화 데이터(application/ld+json)는 실행되지 않는 데이터라 CSP 와 상관없다
+  for (const m of markup.matchAll(/<script\b([^>]*)>/g)) {
+    if (/\stype="application\/ld\+json"/.test(m[1])) continue;
+    assert.match(m[1], /\ssrc=/, `인라인 스크립트: ${m[0]}`);
+  }
   assert.doesNotMatch(markup, /<[^>]+\son[a-z]+\s*=/i, '인라인 이벤트 속성(onclick= 등)');
   assert.doesNotMatch(markup, /javascript:/i);
 });

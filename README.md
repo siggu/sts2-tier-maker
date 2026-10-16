@@ -31,6 +31,7 @@ Slay the Spire 2의 캐릭터·보스·카드·유물·포션으로 티어 리�
 - `site/data/sts2.json`(영어 기본) + `site/data/i18n/<언어>.json`(언어별 덮어쓰기), 이미지는 `site/data/img/`
 - 사이트 문구는 `site/js/i18n-*.js`, 프로필 얼굴은 `site/img/avatars/`, 브라우저 이미지 검사 모델은 `site/vendor/nsfwjs/`
 - 데이터 갱신 워크플로가 끝나면 사이트·API 배포가 이어서 돈다
+- 검색엔진용 페이지: 배포 때 `tools/build-seo.mjs`가 템플릿마다 진짜 주소의 페이지(`/tier/…`, 5개 언어), `sitemap.xml`, `robots.txt`를 만든다 (저장소에는 넣지 않음). 링크 미리보기 그림은 `site/img/og.png`
 
 ## 처음 설정
 

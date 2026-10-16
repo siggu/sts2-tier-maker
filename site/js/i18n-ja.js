@@ -1,7 +1,7 @@
 // 日本語のサイト文言
 export default {
   'site.name': '尖塔のティアメーカー',
-  'meta.title': '尖塔のティアメーカー · Slay the Spire 2',
+  'meta.title': '尖塔のティアメーカー · Slay the Spire 2 ティアリスト・バランス投票',
   'meta.description': 'Slay the Spire 2 のキャラクター・ボス・カード・レリック・ポーションのティアリストを作り、どれが強すぎてどれが弱いかをみんなで投票しよう。',
   'foot.rights': '非公式のファンサイトです。Slay the Spire 2 およびすべてのカード・レリック画像の権利は <a href="https://www.megacrit.com/" rel="noopener">Mega Crit</a> に帰属します。',
   'foot.source': 'データ出典: <a href="https://slaythespire.wiki.gg/" rel="noopener">Slay the Spire Wiki</a>',

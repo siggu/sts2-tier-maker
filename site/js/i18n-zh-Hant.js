@@ -1,7 +1,7 @@
 // 繁體中文（臺灣）網站文字 (遊戲用語依照《殺戮尖塔 2》官方繁體中文)
 export default {
   'site.name': '尖塔梯度表',
-  'meta.title': '尖塔梯度表 · Slay the Spire 2',
+  'meta.title': '尖塔梯度表 · 殺戮尖塔2（Slay the Spire 2）梯度表與平衡投票',
   'meta.description': '為《殺戮尖塔 2》的角色、頭目、卡牌、遺物和藥水製作梯度表，並和大家一起投票：哪些太強、哪些太弱？',
   'foot.rights': '本站為非官方粉絲網站。《Slay the Spire 2》及所有卡牌、遺物圖片的權利屬於 <a href="https://www.megacrit.com/" rel="noopener">Mega Crit</a>。',
   'foot.source': '資料來源：<a href="https://slaythespire.wiki.gg/" rel="noopener">Slay the Spire Wiki</a>',

@@ -1,8 +1,8 @@
 // 한국어 사이트 문구
 export default {
   'site.name': '첨탑의 티어 메이커',
-  'meta.title': '첨탑의 티어 메이커 · Slay the Spire 2',
-  'meta.description': 'Slay the Spire 2 캐릭터·보스·카드·유물·포션 티어 리스트를 만들고, 무엇이 사기이고 약한지 함께 투표하세요.',
+  'meta.title': '첨탑의 티어 메이커 · 슬더스2(Slay the Spire 2) 티어 리스트·밸런스 투표',
+  'meta.description': '슬레이 더 스파이어 2(슬더스2) 캐릭터·보스·카드·유물·포션 티어 리스트를 만들고, 무엇이 사기이고 약한지 함께 투표하세요. 이상형 월드컵도 즐길 수 있습니다.',
   'foot.rights': '팬 메이드 비공식 사이트입니다. Slay the Spire 2 및 모든 카드·유물 이미지의 권리는 <a href="https://www.megacrit.com/" rel="noopener">Mega Crit</a>에 있습니다.',
   'foot.source': '데이터 출처: <a href="https://slaythespire.wiki.gg/" rel="noopener">Slay the Spire Wiki</a>',
 

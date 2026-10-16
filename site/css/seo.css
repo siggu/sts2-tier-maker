@@ -1,0 +1,51 @@
+/* 검색엔진용 정적 페이지 (tools/build-seo.mjs 가 만드는 /tier/…). style.css 의 토큰(--gold, --panel …)과 .topbar, .btn, .crumbs, .foot 를 쓴다. */
+
+.seo-page .topbar { grid-template-columns: auto 1fr auto; }
+.seo-langs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; font-size: 13px; }
+.seo-langs a { color: var(--muted); }
+.seo-langs a:hover { color: var(--gold-hi); }
+.seo-langs [aria-current] { color: var(--gold-hi); font-weight: 700; }
+
+.seo-main { width: min(1100px, 100%); margin: 0 auto; padding: 18px 16px 40px; }
+.seo-h1 {
+  margin: 10px 0 8px;
+  font-family: var(--font-title); font-size: clamp(26px, 4vw, 38px); line-height: 1.2; color: var(--gold-hi);
+}
+.seo-desc { max-width: 75ch; margin: 0 0 16px; color: var(--text); font-size: 15px; line-height: 1.7; }
+.seo-cta { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+.seo-lead { margin: 26px 0 0; color: var(--muted); font-size: 13.5px; }
+
+.seo-sec { margin: 0 0 22px; }
+.seo-sec h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: 17px; color: var(--gold-hi); }
+.seo-n { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+
+/* 항목 그림 목록 */
+.seo-items {
+  display: grid; gap: 10px; margin: 0; padding: 0; list-style: none;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+.seo-items li {
+  display: grid; justify-items: center; align-content: start; gap: 6px; min-width: 0; padding: 8px 6px;
+  border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; background: var(--panel);
+  text-align: center; font-size: 12.5px; line-height: 1.3;
+}
+.seo-items li span { overflow-wrap: anywhere; }
+.seo-items img { width: 100%; height: 78px; object-fit: contain; }
+.seo-items.seo-t-card { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.seo-items.seo-t-card img { height: 150px; }
+.seo-items.seo-t-portrait img, .seo-items.seo-t-creature img { height: 110px; }
+.seo-noimg { width: 100%; height: 78px; border-radius: 8px; background: rgba(255, 255, 255, .05); }
+
+/* 다른 티어 리스트 링크 */
+.seo-related ul { display: grid; gap: 6px 18px; margin: 0; padding: 0; list-style: none; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.seo-related a { color: var(--text); }
+.seo-related a:hover { color: var(--gold-hi); }
+
+@media (max-width: 640px) {
+  .seo-page .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .seo-page .topnav { order: 3; width: 100%; }
+  .seo-langs { order: 2; width: 100%; justify-content: flex-start; }
+  .seo-items { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .seo-items.seo-t-card { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  .seo-items.seo-t-card img { height: 128px; }
+}

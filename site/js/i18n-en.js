@@ -1,7 +1,7 @@
 // English site text
 export default {
   'site.name': 'Spire Tier Maker',
-  'meta.title': 'Spire Tier Maker · Slay the Spire 2',
+  'meta.title': 'Spire Tier Maker · Slay the Spire 2 Tier Lists & Balance Votes',
   'meta.description': 'Make Slay the Spire 2 tier lists for characters, bosses, cards, relics and potions, and vote together on what is broken and what is weak.',
   'foot.rights': 'Unofficial fan-made site. Slay the Spire 2 and all card and relic images belong to <a href="https://www.megacrit.com/" rel="noopener">Mega Crit</a>.',
   'foot.source': 'Data: <a href="https://slaythespire.wiki.gg/" rel="noopener">Slay the Spire Wiki</a>',
