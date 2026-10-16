@@ -323,7 +323,29 @@ test('이미지 신고·관리자 검토 흐름', { skip: !DB0 && 'node:sqlite �
     assert.equal((await call('GET', '/admin/images?status=nope', { token: T })).data.reason, 'status');
     assert.equal((await call('GET', '/admin/images?cursor=1%20or%201', { token: T })).data.reason, 'cursor');
 
-    r = await call('GET', '/admin/images', { token: T }); // 기본 pending
+    // 기본은 상태와 관계없이 최근 순 + 상태별 수
+    r = await call('GET', '/admin/images', { token: T });
+    assert.deepEqual(r.data.images.map(i => i.id), [pendingId, okId]);
+    assert.deepEqual(r.data.counts, { all: 2, pending: 1, reported: 1, hidden: 1, blocked: 0 });
+    // 기간·사용자·용도
+    const created = DB.raw.prepare('SELECT created FROM images WHERE id = ?').get(pendingId).created;
+    assert.deepEqual((await call('GET', `/admin/images?from=${created}`, { token: T })).data.images.map(i => i.id), [pendingId]);
+    assert.deepEqual((await call('GET', `/admin/images?to=${created}`, { token: T })).data.images.map(i => i.id), [okId]);
+    r = await call('GET', `/admin/images?user=${alice.user.id}`, { token: T });
+    assert.deepEqual(r.data.user, { id: alice.user.id, name: 'alice-sub' });
+    assert.ok(r.data.images.every(i => i.user.id === alice.user.id));
+    assert.deepEqual((await call('GET', '/admin/images?purpose=avatar', { token: T })).data.counts.all, 0);
+    for (const [qs, reason] of [['from=x', 'from'], ['to=-1', 'to'], ['user=bob', 'user'], ['purpose=hat', 'purpose']]) {
+      assert.equal((await call('GET', `/admin/images?${qs}`, { token: T })).data.reason, reason, qs);
+    }
+    // 올린 사람 찾기 (이름 일부, LIKE 특수 문자는 글자로)
+    r = await call('GET', '/admin/uploaders?q=alice', { token: T });
+    assert.deepEqual(r.data.users.map(u => [u.id, u.name]), [[alice.user.id, 'alice-sub']]);
+    assert.ok(r.data.users[0].images >= 1);
+    assert.deepEqual((await call('GET', '/admin/uploaders?q=%25', { token: T })).data.users, []);
+    assert.equal((await call('GET', '/admin/uploaders?q=a', { token: A })).status, 403);
+
+    r = await call('GET', '/admin/images?status=pending', { token: T });
     assert.deepEqual(r.data.images.map(i => i.id), [pendingId]);
     const p = r.data.images[0];
     assert.deepEqual({ ...p, created: 0 }, {
@@ -388,18 +410,21 @@ test('이미지 신고·관리자 검토 흐름', { skip: !DB0 && 'node:sqlite �
     assert.equal((await call('GET', '/me', { token: users[3].token })).data.user.admin, true);
     delete env.ADMIN_USERS;
 
-    // 쪽 나누기: pending 35개 → 30 + 5
+    // 쪽 나누기: pending 65개 → 60 + 5 (기간·사용자 조건과 커서를 함께 써도)
     const now = Date.now();
-    for (let i = 0; i < 35; i++) {
+    for (let i = 0; i < 65; i++) {
       DB.raw.prepare(`INSERT INTO images (id, user_id, type, bytes, size, created, status) VALUES (?, ?, 'image/png', x'00', 1, ?, 'pending')`)
         .run(i.toString(16).padStart(32, 'c'), alice.user.id, now + (i % 4));
     }
-    const page1 = (await call('GET', '/admin/images?status=pending', { token: T })).data;
-    assert.equal(page1.images.length, 30);
-    const page2 = (await call('GET', `/admin/images?status=pending&cursor=${encodeURIComponent(page1.next)}`, { token: T })).data;
+    const scope = `status=pending&from=${now - 1}&user=${alice.user.id}`;
+    const page1 = (await call('GET', `/admin/images?${scope}`, { token: T })).data;
+    assert.equal(page1.images.length, 60);
+    assert.equal(page1.counts.pending, 65);
+    const page2 = (await call('GET', `/admin/images?${scope}&cursor=${encodeURIComponent(page1.next)}`, { token: T })).data;
     assert.equal(page2.images.length, 5);
     assert.equal(page2.next, null);
-    assert.equal(new Set([...page1.images, ...page2.images].map(i => i.id)).size, 35);
+    assert.equal(page2.counts, undefined);
+    assert.equal(new Set([...page1.images, ...page2.images].map(i => i.id)).size, 65);
   } finally {
     delete globalThis.caches;
   }

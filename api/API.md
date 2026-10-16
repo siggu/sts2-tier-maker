@@ -252,7 +252,8 @@ image_blocklist(hash TEXT PK, created INTEGER, reason TEXT)                     
 
 | 요청 | 설명 |
 |---|---|
-| `GET /admin/images?status=pending|reported|hidden|blocked&cursor=` | `{ images: [image], next }` (최신순 30개씩, `status` 기본 `pending`). `reported` = 아직 보이는(`ok`·`pending`) 이미지 가운데 신고가 있는 것. |
+| `GET /admin/images?status=all\|pending\|reported\|hidden\|blocked&from=&to=&user=&purpose=&cursor=` | `{ images: [image], next, counts?, user? }` (최신순 60개씩). `status` 기본 `all`(상태와 관계없이). `from`·`to` = ms(`created >= from`, `< to`), `user` = 올린 사람 id, `purpose` = `cup`\|`avatar`. `reported` = 아직 보이는(`ok`·`pending`) 이미지 가운데 신고가 있는 것. 첫 쪽(cursor 없음)에는 같은 기간·사용자·용도 안의 상태별 수 `counts: { all, pending, reported, hidden, blocked }` 와, `user` 를 줬으면 `user: { id, name }`. 틀린 값은 400 `reason`(`status`·`from`·`to`·`user`·`purpose`·`cursor`). |
+| `GET /admin/uploaders?q=이름` | 이미지를 올린 사람을 이름 일부(또는 id)로 찾기 → `{ users: [{ id, name, images, last }] }` (최근에 올린 순 10명). |
 | `POST /admin/images/:id` `{ action: 'approve'|'hide'|'block' }` | `{ image }`. `approve` → `ok`, 신고를 비우고(다시 3명이 신고해야 숨겨짐) 차단 목록에서 뺀다. `hide` → `hidden`. `block` → `blocked` + 차단 목록(같은 파일 다시 올리기 금지). 숨김·차단은 엣지 캐시에서도 지운다. 없는 이미지 404, 틀린 action 400 `action`. |
 | `GET /admin/img/:id` | 상태와 관계없이 이미지 바이트. `Cache-Control: no-store`. (화면은 `Authorization` 을 붙여 fetch 해 blob 주소로 그린다) |
 
