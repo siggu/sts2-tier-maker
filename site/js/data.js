@@ -43,7 +43,9 @@ export function loadData() {
   if (!loading) {
     // 번역 파일이 없거나 못 받아도 영어로 보여 준다.
     const overlay = lang === 'en' ? Promise.resolve(null) : getJson(`data/i18n/${lang}.json`).catch(() => null);
-    loading = Promise.all([getJson('data/sts2.json'), overlay]).then(([raw, tr]) => buildIndex(raw, tr));
+    // 용어 팝업 설명(영어). 없거나 못 받아도 팝업만 빠진다.
+    const glossary = getJson('data/glossary.json').catch(() => null);
+    loading = Promise.all([getJson('data/sts2.json'), overlay, glossary]).then(([raw, tr, gl]) => buildIndex(raw, tr, gl));
   }
   return loading;
 }
@@ -63,7 +65,7 @@ function translateItem(item, tr) {
   return out;
 }
 
-function buildIndex(raw, tr) {
+function buildIndex(raw, tr, gl) {
   const categories = raw.categories.map(cat => {
     const groupNames = tr?.groups?.[cat.id] || {};
     const groups = (cat.groups || []).map(g => ({ ...g, name: groupNames[g.id] || g.name }));
@@ -81,12 +83,28 @@ function buildIndex(raw, tr) {
   const templates = categories.flatMap(buildTemplates);
   const byId = new Map(templates.map(t => [t.id, t]));
 
+  // 용어 팝업: 'cards/abundance' 같은 사이트 항목, 'kw:vulnerable'·'card:dowsing'·'potion:ambergris' 같은 용어 (tools/fetch-data.mjs buildGlossary)
+  const catById = new Map(categories.map(c => [c.id, c]));
+  const termNames = tr?.glossary || {};
+  const term = key => {
+    const slash = key.indexOf('/');
+    if (slash > 0 && !key.includes(':')) {
+      const cat = catById.get(key.slice(0, slash));
+      const item = cat?.byId.get(key.slice(slash + 1));
+      return item ? { key, kind: 'item', category: cat, item, name: item.name, nameEn: item.nameEn } : null;
+    }
+    const g = gl?.terms?.[key];
+    if (!g) return null;
+    return { key, kind: 'term', ...g, name: termNames[key] || g.name, nameEn: g.name, textEn: lang !== 'en' };
+  };
+
   return {
     fetchedAt: raw.fetchedAt,
     source: raw.source,
     categories,
     templates,
     template: id => byId.get(id),
+    term,
   };
 }
 

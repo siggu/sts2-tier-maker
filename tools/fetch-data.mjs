@@ -145,7 +145,12 @@ async function get(url, { binary = false, tries = 7 } = {}) {
   }
 }
 
-async function module(title) {
+const moduleCache = new Map();
+function module(title) {
+  if (!moduleCache.has(title)) moduleCache.set(title, loadModule(title));
+  return moduleCache.get(title);
+}
+async function loadModule(title) {
   // 로컬 테스트: WIKI_RAW_DIR 에 discover 결과(modules/*.lua)가 있으면 그걸 읽는다.
   const src = process.env.WIKI_RAW_DIR
     ? await readFile(join(process.env.WIKI_RAW_DIR, title.replace(/[^\w.-]+/g, '_') + '.lua'), 'utf8')
@@ -178,8 +183,9 @@ export function formatText(raw, mode = 'both') {
   let s = String(raw)
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    // 위키 틀: {{QueryLink|Cards|type:Attack|Attacks|2}} → Attacks, {{KW|Osty|Osty's|2}} → Osty's (키워드는 굵게, 아래에서 $ 표시로)
-    .replace(/\{\{([^{}]*)\}\}/g, (m, body) => (/^KW2?\|/.test(body) ? '$' : '') + wikiTemplate(m, body))
+    // 위키 틀: {{QueryLink|Cards|type:Attack|Attacks|2}} → Attacks, {{KW|Osty|Osty's|2}} → Osty's
+    // 카드·유물·포션·키워드를 가리키는 틀은 참조 표시를 남긴다 (용어 팝업, resolveRefs)
+    .replace(/\{\{([^{}]*)\}\}/g, (m, body) => refMark(body, wikiTemplate(m, body)))
     .replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1')
     .replace(/'''?/g, '')
     .replace(/@([A-Z][a-z]+)/g, '$1'); // @Gold → Gold (아이콘 이름)
@@ -188,7 +194,8 @@ export function formatText(raw, mode = 'both') {
     if (mode === 'up') return b ? `<span class="up">${b}</span>` : '';
     return `${a}<span class="up">(${b})</span>`;
   });
-  s = s.replace(/\$([A-Z][A-Za-z']*(?:\s(?:of|the)\s[A-Z][A-Za-z']*)?)/g, '<b>$1</b>');
+  s = s.replace(/\$([A-Z][A-Za-z']*(?:\s(?:of|the)\s[A-Z][A-Za-z']*)?)/g, (_, w) => refTag('kw', w, w));
+  s = s.replace(/\uE000([a-z]+)\uE003([^\uE001]*)\uE001([^\uE002]*)\uE002/g, (_, kind, target, shown) => refTag(kind, target, shown));
   // 같은 아이콘이 넷 이상 이어지면 게임처럼 "5 ★" 로 줄인다 (번역 문구와 같은 규칙)
   s = s.replace(/(?:@([A-Z]{2})\s?)+/g, (m, code) => {
     const n = m.match(/@[A-Z]{2}/g);
@@ -202,12 +209,23 @@ export function formatText(raw, mode = 'both') {
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// 용어 참조: 위키 틀 이름 → 종류. <b data-ref="종류|위키 이름"> 로 남겨 두고 main 에서 실제 키(cards/…, kw:…)로 바꾼다.
+const REF_KIND = { C: 'card', C2: 'card', P: 'potion', P2: 'potion', R: 'relic', R2: 'relic', KW: 'kw', KW2: 'kw', BD: 'kw', BD2: 'kw' };
+// formatText 안에서 escapeHtml 을 거쳐도 남도록 사용자 영역 문자로 감싼다
+function refMark(body, shown) {
+  const [name, target] = body.split('|');
+  const kind = REF_KIND[name.trim()];
+  return kind && target?.trim() ? `\uE000${kind}\uE003${target.trim()}\uE001${shown}\uE002` : shown;
+}
+const refTag = (kind, target, shown) => `<b data-ref="${kind}|${target}">${shown}</b>`;
+
 // 적 행동 설명: {{BD2|Strength}} → 키워드, {{Asc2|9|160}} → 승천 수치
 export function formatEnemyText(raw) {
   if (!raw) return '';
   let s = escapeHtml(String(raw).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''));
   s = s.replace(/\{\{Asc2?\|(\d+)\|([^{}]*)\}\}/g, '<span class="asc" data-asc="$1">$2</span>');
-  s = s.replace(/\{\{(?:BD2|KW2|BD|KW)\|([^{}|]*)\}\}/g, '<b>$1</b>');
+  s = s.replace(/\{\{(?:BD2|KW2|BD|KW)\|([^{}|]*)\}\}/g, (_, w) => refTag('kw', w, w));
+  s = s.replace(/\{\{C2?\|([^{}|]*)(?:\|([^{}|]*))?\}\}/g, (_, w, shown) => refTag('card', w, shown || w));
   s = s.replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1').replace(/\{\{([^{}|]*)\}\}/g, '$1');
   s = s.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1').replace(/'''?/g, '');
   return s.trim();
@@ -594,6 +612,161 @@ async function enchantmentCategory() {
 
 const formatPlain = raw => String(raw || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, '$1').replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1').trim();
 
+// ---------------------------------------------------------------- 용어 팝업
+// 효과 문구 속 <b data-ref="종류|위키 이름"> 을 실제 키로 바꾸고, 가리키는 키워드·버프/디버프·구체·티어표에 없는 카드의 설명을 모은다.
+//   키: 사이트 항목은 'cards/abundance' 처럼 그대로, 그 밖은 'kw:vulnerable'(키워드·버프·디버프·구체), 'card:dowsing'(토큰·퀘스트·상태이상·기본 카드)
+//   site/data/glossary.json = { terms: { 키: { name, type, text, img?, cost? } } } (영어). 언어별 이름은 i18n/<언어>.json 의 glossary.
+const KW_MODULES = ['Common', 'Player', 'Afflictions', 'Characters', 'Icons'];
+const POWER_MODULES = ['Common', 'Debuff', 'Ironclad', 'Silent', 'Regent', 'Necrobinder', 'Defect', 'Enemy'];
+
+async function tryModule(title) {
+  try { return await module(title); } catch (err) { console.warn(`! ${title}: ${err.message}`); return {}; }
+}
+
+// 'Exhausted' → exhausted / exhaust, "Osty's" → osty, 'Shivs' → shiv
+function nameVariants(name) {
+  const n = lc(name).replace(/[’']s$/, '').replace(/\s+/g, ' ');
+  return [...new Set([n, n.replace(/es$/, ''), n.replace(/s$/, ''), n.replace(/ed$/, ''), n.replace(/d$/, ''), n.replace(/ned$/, ''), n.replace(/ing$/, ''), n.replace(/ing$/, 'e')])];
+}
+
+async function buildGlossary(categories) {
+  const defs = new Map(); // 키 → { name, raw, img, type, cost? }
+  // 버프·디버프(같은 이름이면 버프·디버프 정의가 먼저)
+  for (const m of POWER_MODULES) {
+    for (const [name, d] of Object.entries(await tryModule(`Module:Powers/StS2 data/${m}`))) {
+      const key = `kw:${slug(name)}`;
+      if (!defs.has(key) && d.Text) defs.set(key, { name, raw: d.Text, img: d.Image, type: /debuff/i.test(d.Type || '') ? 'debuff' : 'buff' });
+    }
+  }
+  const alias = new Map(); // 다른 이름 → 키 ('lightning' → kw:lightning-orb)
+  for (const m of KW_MODULES) {
+    for (const [name, d] of Object.entries(await tryModule(`Module:Keywords/StS2 data/${m}`))) {
+      const key = `kw:${slug(name)}`;
+      if (!defs.has(key) && d.Text) defs.set(key, { name, raw: d.Text, img: d.Image, type: m === 'Icons' ? 'orb' : m === 'Characters' ? 'character' : 'keyword' });
+      if (/ Orb$/.test(name)) alias.set(lc(name.replace(/ Orb$/, '')), key);
+    }
+  }
+  // 티어표에 없는 카드(토큰·퀘스트·상태이상·기본 카드)
+  for (const group of [...CHARACTERS.map(c => c.en), 'Colorless']) {
+    for (const [name, c] of Object.entries(await tryModule(`Module:Cards/StS2 data/${group}`))) {
+      if (CARD_RARITIES.includes(c.Rarity) || c.Rarity === 'Curse') continue;
+      const key = `card:${slug(name)}`;
+      if (!defs.has(key)) defs.set(key, { name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''), raw: c.Text, img: c.Image, type: 'card', cost: c.Cost, cardType: c.Type });
+    }
+  }
+
+  // 티어표에 없는 포션(용연향, 포션 모양 돌 등)
+  for (const [name, p] of Object.entries(await tryModule('Module:Potions/StS2 data'))) {
+    if (['Common', 'Uncommon', 'Rare'].includes(p.Rarity)) continue;
+    const key = `potion:${slug(name)}`;
+    if (!defs.has(key)) defs.set(key, { name, raw: p.Text, img: p.Image, type: 'potion' });
+  }
+
+  // 이름 → 키 (종류별). 숨긴 항목은 연결하지 않는다.
+  const index = { kw: new Map(), card: new Map(), relic: new Map(), potion: new Map() };
+  const add = (kind, name, key) => { for (const v of nameVariants(name)) if (!index[kind].has(v)) index[kind].set(v, key); };
+  for (const [key, d] of defs) add(key.startsWith('card:') ? 'card' : key.startsWith('potion:') ? 'potion' : 'kw', d.name, key);
+  for (const [a, key] of alias) add('kw', a, key);
+  const KIND_OF = { cards: 'card', curses: 'card', relics: 'relic', potions: 'potion', enchantments: 'kw' };
+  for (const cat of categories) {
+    const kind = KIND_OF[cat.id];
+    if (!kind) continue;
+    for (const item of cat.items) if (!item.hidden && !item.id.endsWith('-fake')) {
+      // 사이트 항목이 같은 이름의 정의보다 먼저 (카드 'Shiv' 등)
+      for (const v of nameVariants(item.name)) index[kind].set(v, `${cat.id}/${item.id}`);
+    }
+  }
+  const ORDER = { kw: ['kw', 'card'], card: ['card', 'kw'], relic: ['relic'], potion: ['potion'] };
+  const resolve = (kind, name) => {
+    for (const k of ORDER[kind] || []) for (const v of nameVariants(name)) if (index[k].has(v)) return index[k].get(v);
+    return null;
+  };
+
+  const used = new Set();
+  const unescape = s => s.replace(/&#39;|&quot;|&amp;/g, m => ({ '&#39;': "'", '&quot;': '"', '&amp;': '&' })[m]);
+  // "$Royally Approved" 처럼 두 낱말 이름은 위키 표기에서 첫 낱말만 묶이므로 뒤 낱말까지 붙여 본다
+  const fix = html => html && html.replace(/<b data-ref="([a-z]+)\|([^"]*)">([^<]*)<\/b>( [A-Z][A-Za-z]+)?/g, (all, kind, name, shown, next = '') => {
+    let key = resolve(kind, unescape(name));
+    let tail = next;
+    if (!key && next) { key = resolve(kind, `${unescape(name)}${next}`); if (key) { shown += next; tail = ''; } }
+    if (!key) return `<b>${shown}</b>${tail}`;
+    used.add(key);
+    return `<b data-ref="${key}">${shown}</b>${tail}`;
+  });
+  for (const cat of categories) {
+    for (const item of cat.items) {
+      used.clear();
+      item.text = fix(item.text);
+      item.textUp = fix(item.textUp);
+      for (const m of item.members || []) for (const mv of m.moves) mv.text = fix(mv.text);
+      used.delete(`${cat.id}/${item.id}`);
+      if (used.size) item.refs = [...used];
+      for (const k of used) allUsed.add(k);
+    }
+  }
+  // 정의 설명 안의 참조도 따라간다 (다우징 → 풍요)
+  const terms = {};
+  const queue = [...allUsed].filter(k => defs.has(k));
+  while (queue.length) {
+    const key = queue.shift();
+    if (terms[key]) continue;
+    const d = defs.get(key);
+    used.clear();
+    const text = fix(formatText(d.raw));
+    used.delete(key);
+    const id = key.slice(key.indexOf(':') + 1);
+    terms[key] = {
+      name: d.name, type: d.type, text,
+      cost: d.cost ?? undefined, cardType: d.cardType ? String(d.cardType).toLowerCase() : undefined,
+      refs: used.size ? [...used] : undefined,
+      img: d.type === 'card' ? image(d.img, 'cards-extra', id, { height: 300 })
+        : d.type === 'potion' ? image(d.img, 'potions-extra', id, { height: 128, width: 128 })
+        : image(d.img, 'terms', id, { height: 64, width: 64 }),
+    };
+    for (const k of used) { allUsed.add(k); if (defs.has(k) && !terms[k]) queue.push(k); }
+  }
+
+  // 언어별 이름: 카드는 게임 언어 파일의 카드 이름, 키워드는 게임 효과 문구의 [gold] 용어를 영어·번역 틀에서 맞대어 찾는다.
+  for (const lang of ACTIVE) {
+    const pair = goldTermPairs(lang);
+    const names = {};
+    for (const [key, t] of Object.entries(terms)) {
+      const n = key.startsWith('card:') ? nameOf(lang, 'cards', t.name)
+        : key.startsWith('potion:') ? nameOf(lang, 'potions', t.name)
+        : L10N[lang].keywords?.[t.name] || pair.get(lc(t.name)) || pair.get(lc(t.name.replace(/ Orb$/, '')));
+      if (n) names[key] = n;
+    }
+    OVERLAY[lang].glossary = names;
+  }
+  console.log(`용어 팝업: 정의 ${Object.keys(terms).length}개, 참조된 키 ${allUsed.size}개`);
+  return { terms };
+}
+const allUsed = new Set();
+
+// 게임 언어 파일의 영어·번역 효과 틀에서 [gold]용어[/gold] 를 서로 짝짓는다 (함께 나오는 횟수, 서로 가장 많이 함께 나오는 짝만)
+function goldTermPairs(lang) {
+  const gold = s => [...new Set([...String(s || '').matchAll(/\[gold\]([^\[]+)\[\/gold\]/g)].map(m => m[1].trim()))];
+  const score = new Map(); // en → Map(tr → 점수)
+  for (const table of ['cards', 'relics', 'potions', 'enchantments']) {
+    for (const e of Object.values(L10N[lang][table] || {})) {
+      if (!e.en || !e.tr) continue;
+      const E = gold(e.en), T = gold(e.tr);
+      for (const a of E) for (const b of T) {
+        const m = score.get(lc(a)) || new Map();
+        m.set(b, (m.get(b) || 0) + 1 / (E.length * T.length));
+        score.set(lc(a), m);
+      }
+    }
+  }
+  const best = new Map(); // en → [tr, 점수]
+  for (const [en, m] of score) best.set(en, [...m].sort((x, y) => y[1] - x[1])[0]);
+  const bestEnFor = new Map(); // tr → en
+  for (const [en, m] of score) for (const [tr, n] of m) if (!bestEnFor.has(tr) || bestEnFor.get(tr)[1] < n) bestEnFor.set(tr, [en, n]);
+  const out = new Map();
+  for (const [en, [tr, n]] of best) if (n >= 1 && bestEnFor.get(tr)?.[0] === en) out.set(en, tr);
+  return out;
+}
+
 const ANCIENTS = ['Neow', 'Orobas', 'Darv', 'Tezcatara', 'Tanx', 'Pael', 'Nonupeipe', 'Vakuu'];
 const ANCIENT_ACTS = [
   { id: 'act1', act: 1, name: 'Act 1', color: '#6f9a4a' },
@@ -668,6 +841,18 @@ async function charactersAndAncients() {
 
 // ---------------------------------------------------------------- 실행
 
+// 게임 언어 파일(한국어)에 이름이 없는 항목은 숨긴다 (hidden: true). 위키에만 있고 게임 파일에는 아직 없는 항목이다.
+// 매번 새로 정하므로, 새 언어 파일을 넣고 다시 돌리면 이름이 생긴 항목은 저절로 다시 보이고, 사라진 항목은 숨겨진다.
+function markHidden(categories) {
+  const hidden = [];
+  for (const cat of categories) {
+    for (const item of cat.items) {
+      if (L10N.ko && !OVERLAY.ko.items[`${cat.id}/${item.id}`]?.name) { item.hidden = true; hidden.push(`${cat.id}/${item.id}`); }
+    }
+  }
+  if (hidden.length) console.log(`숨김(게임 언어 파일에 이름 없음) ${hidden.length}개: ${hidden.join(', ')}`);
+}
+
 async function main() {
   const [characters, ancients] = await charactersAndAncients();
   const categories = [
@@ -682,6 +867,10 @@ async function main() {
     await eliteCategory(),
     await bossCategory(),
   ];
+
+  // 숨김 표시를 먼저 정해야 숨긴 항목으로 연결하지 않는다 (아래 숨김 처리를 여기로 당겨 쓴다)
+  markHidden(categories);
+  const glossary = await buildGlossary(categories);
 
   let imageStats = null;
   if (WITH_IMAGES) imageStats = await runImageJobs();
@@ -701,15 +890,7 @@ async function main() {
     }
     cat.items.sort((a, b) => a.name.localeCompare(b.name, 'en'));
   }
-  // 게임 언어 파일(한국어)에 이름이 없는 항목은 숨긴다 (hidden: true). 위키에만 있고 게임 파일에는 아직 없는 항목이다.
-  // 매번 새로 정하므로, 새 언어 파일을 넣고 다시 돌리면 이름이 생긴 항목은 저절로 다시 보이고, 사라진 항목은 숨겨진다.
-  const hidden = [];
-  for (const cat of categories) {
-    for (const item of cat.items) {
-      if (L10N.ko && !OVERLAY.ko.items[`${cat.id}/${item.id}`]?.name) { item.hidden = true; hidden.push(`${cat.id}/${item.id}`); }
-    }
-  }
-  if (hidden.length) console.log(`숨김(게임 언어 파일에 이름 없음) ${hidden.length}개: ${hidden.join(', ')}`);
+
   // 숨긴 항목도 키는 남긴다 (이미 받은 표·댓글이 다시 보일 때 그대로 이어지게)
   const keys = categories.flatMap(c => c.items.map(i => `${c.id}/${i.id}`)).sort();
   const known = new Set(keys);
@@ -733,6 +914,7 @@ async function main() {
   await mkdir(join(DATA, 'i18n'), { recursive: true });
   await writeFile(join(DATA, 'sts2.json'), JSON.stringify(out));
   await writeFile(join(DATA, 'keys.json'), JSON.stringify(keys));
+  await writeFile(join(DATA, 'glossary.json'), JSON.stringify(glossary));
   for (const lang of ACTIVE) await writeFile(join(DATA, 'i18n', `${lang}.json`), JSON.stringify(OVERLAY[lang]));
 
   if (AUDIT) await writeFile(process.env.L10N_AUDIT, JSON.stringify(AUDIT));

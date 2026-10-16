@@ -225,5 +225,13 @@ export default {
   'detail.movesEnglish': 'Move descriptions are the wiki’s English text.',
   'detail.textEnglish': 'The official translation of this effect is not matched yet, so the English text is shown.',
   'detail.betaNote': 'Card text follows the latest public beta. Numbers on the card image may differ.',
+  'ref.type.buff': 'Buff',
+  'ref.type.debuff': 'Debuff',
+  'ref.type.keyword': 'Keyword',
+  'ref.type.orb': 'Orb',
+  'ref.type.character': 'Character',
+  'ref.type.card': 'Card',
+  'ref.type.potion': 'Potion',
+  'ref.englishText': 'The description is the English wiki text.',
   'detail.relicsN': '{n} relics offered',
 };

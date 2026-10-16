@@ -225,5 +225,13 @@ export default {
   'detail.movesEnglish': '행동 설명은 위키의 영어 원문입니다.',
   'detail.textEnglish': '이 항목은 공식 번역 효과를 아직 맞추지 못해 영어 원문을 보여 줍니다.',
   'detail.betaNote': '카드 설명은 최신 public-beta 기준입니다. 카드 그림 속 수치와 다를 수 있어요.',
+  'ref.type.buff': '버프',
+  'ref.type.debuff': '디버프',
+  'ref.type.keyword': '키워드',
+  'ref.type.orb': '구체',
+  'ref.type.character': '캐릭터',
+  'ref.type.card': '카드',
+  'ref.type.potion': '포션',
+  'ref.englishText': '설명은 위키 영어 원문입니다.',
   'detail.relicsN': '주는 유물 {n}개',
 };
