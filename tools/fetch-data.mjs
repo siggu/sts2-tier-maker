@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { parseLuaData } from './lua.mjs';
+import { cardsFromCargo } from './cargo.mjs';
 import { alignValues, looseValues, renderKoBoth, splitKeywords, withKeywords, wikiTemplate } from './l10n.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -145,6 +146,39 @@ async function get(url, { binary = false, tries = 7 } = {}) {
   }
 }
 
+// 위키 Cargo 표 조회 (500개씩). 로컬 시험: WIKI_CARGO_DIR 에 <표>.json 이 있으면 그걸 읽는다.
+async function cargo(table, fields, where) {
+  if (process.env.WIKI_CARGO_DIR) return JSON.parse(await readFile(join(process.env.WIKI_CARGO_DIR, `${table}.json`), 'utf8'));
+  const rows = [];
+  for (let offset = 0; ; offset += 500) {
+    const qs = new URLSearchParams({ action: 'cargoquery', format: 'json', tables: table, fields, where, limit: '500', offset: String(offset) });
+    const r = JSON.parse(await get(`${WIKI}/api.php?${qs}`));
+    if (r.error) throw new Error(`위키 Cargo ${table}: ${r.error.info || r.error.code}`);
+    const page = (r.cargoquery || []).map(x => x.title);
+    rows.push(...page);
+    if (page.length < 500) return rows;
+    await sleep(500);
+  }
+}
+
+// StS2 카드 전체: 이름 → 예전 데이터 모듈 모양 (tools/cargo.mjs). 2026-10-17 위키가 카드 데이터 모듈을 지우고 Cargo 표로 옮겼다.
+let cardTable = null;
+function stS2Cards() {
+  cardTable ||= Promise.all([
+    cargo('Cards', '_pageName,Name,Game,Image,Color,Type,Rarity,Cost,CostPlus,StarCost,NoUpgrade,MultiplayerOnly,Description', 'Game="2"'),
+    cargo('CardArt', '_pageName,Name,Game,FullCard,FullCardPlus,FullCardBeta,FullCardBetaPlus', 'Game="2"'),
+  ]).then(([rows, art]) => {
+    const all = cardsFromCargo(rows, art);
+    if (Object.keys(all).length < 300) throw new Error(`위키 Cargo 카드가 너무 적다 (${Object.keys(all).length}장)`);
+    return all;
+  });
+  return cardTable;
+}
+// 한 묶음(캐릭터·무색)의 카드
+async function cardGroup(group) {
+  return Object.fromEntries(Object.entries(await stS2Cards()).filter(([, c]) => c.Color === group));
+}
+
 const moduleCache = new Map();
 function module(title) {
   if (!moduleCache.has(title)) moduleCache.set(title, loadModule(title));
@@ -236,11 +270,11 @@ export function formatEnemyText(raw) {
 const imageJobs = [];
 
 // 위키 파일을 받아 webp 로 줄여 저장할 작업을 등록하고, 사이트에서 쓸 경로를 돌려준다.
-// beta: 위키의 public-beta 그림('Beta-<파일>')이 있으면 그것을 쓴다 (카드). 사이트는 public-beta 기준이다.
-function image(file, category, id, { height, width, trim = false, beta = false } = {}) {
+// beta: 위키의 public-beta 그림 파일 이름(CardArt 의 FullCardBeta). 그 파일이 있으면 그것을 쓴다. 사이트는 public-beta 기준이다.
+function image(file, category, id, { height, width, trim = false, beta = null } = {}) {
   if (!file) return null;
   const rel = `data/img/${category}/${id}.webp`;
-  imageJobs.push({ file, out: join(ROOT, 'site', rel), height, width, trim, beta: beta ? `Beta-${file}` : null });
+  imageJobs.push({ file, out: join(ROOT, 'site', rel), height, width, trim, beta: beta || null });
   return rel;
 }
 
@@ -354,28 +388,25 @@ async function runImageJobs() {
 
 const CARD_RARITIES = ['Common', 'Uncommon', 'Rare', 'Ancient', 'Event'];
 
-// 위키 데이터가 아직 public-beta 를 따라가지 못한 카드 (sts2.untapped.gg 의 v0.111.0 베타 문구로 2026-10-16 확인).
-// 위키가 고쳐져 값이 같아지면 로그로 알려 준다 — 그때 여기서 지우면 된다.
-const BETA_FIXES = {
-  'Juggernaut': { Text: 'Whenever you gain $Block, deal [6|8] damage to a random enemy.' },
-  'Brightest Flame': { Text: 'Gain [@CE@CE|@CE@CE@CE].<br>Draw [2|3] cards.<br>Lose 2 Max HP.' },
-  'Expect a Fight': { Cost: 3, CostPlus: undefined, Text: 'Gain [15|16] $Block.<br>Gains [5|8] additional $Block for each $Strength you have.' },
-  'Guiding Star': { StarCost: 1, Text: 'Deal [12|13] damage.<br>Next turn, draw [2|3] cards.' },
-  'Abundance': { CostPlus: 0, Text: 'Choose 1 of 3 Upgraded Powers to add into your Hand. It\'s free to play this turn.<br>$Exhaust.' },
+// 위키 데이터가 틀린 카드 (위키를 고치기 전까지). 위키 값이 같아지면 로그로 알려 준다 — 그때 여기서 지우면 된다.
+//   public-beta 수치는 2026-10-17 위키 Cargo 이전 때 모두 반영되어 예전 보정(저거너트 등 5장)은 지웠다.
+const WIKI_FIXES = {
+  // 위키 설명이 'return this' 에서 끊겨 있다 (2026-10-20 확인)
+  'Right Hand Hand': { Text: '$Osty deals [4|6] damage.<br>Whenever you play a card that costs @NE@NE or more, return this to your Hand from the Discard Pile.' },
 };
-function betaFix(name, c) {
-  const fix = BETA_FIXES[name];
+function wikiFix(name, c) {
+  const fix = WIKI_FIXES[name];
   if (!fix) return c;
-  if (Object.entries(fix).every(([k, v]) => c[k] === v)) console.log(`  위키가 public-beta 를 반영함 — BETA_FIXES 에서 '${name}' 를 지워도 된다`);
+  if (Object.entries(fix).every(([k, v]) => c[k] === v)) console.log(`  위키가 고쳐짐 — WIKI_FIXES 에서 '${name}' 를 지워도 된다`);
   return { ...c, ...fix };
 }
 
 async function cards() {
   const items = [];
   for (const group of [...CHARACTERS.map(c => c.en), 'Colorless']) {
-    const data = await module(`Module:Cards/StS2 data/${group}`);
+    const data = await cardGroup(group);
     for (const [name, raw] of Object.entries(data)) {
-      const c = betaFix(name, raw);
+      const c = wikiFix(name, raw);
       if (!CARD_RARITIES.includes(c.Rarity)) continue;
       if (c.Multiplayer && String(c.Multiplayer).toLowerCase() !== 'no') continue;
       const ch = charByEn.get(c.Color);
@@ -412,8 +443,8 @@ function cardItem(name, c, id, group) {
     stars: c.StarCost ?? undefined,
     text: formatText(c.Text),
     textUp: upgradable && changed ? formatText(c.Text, 'up') : undefined,
-    img: image(c.Image, 'cards', id, { height: 300, beta: true }),
-    imgUp: upgradable && c.Image ? image(c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300, beta: true }) : undefined,
+    img: image(c.Image, 'cards', id, { height: 300, beta: c.ImageBeta }),
+    imgUp: upgradable && c.Image ? image(c.ImagePlus || c.Image.replace(/\.png$/i, 'Plus.png'), 'cards-up', id, { height: 300, beta: c.ImageBetaPlus }) : undefined,
   };
 }
 
@@ -421,13 +452,13 @@ function cardItem(name, c, id, group) {
 const playCost = cost => (cost === undefined || cost === null || cost < -1 ? undefined : cost);
 
 async function curses() {
-  const data = await module('Module:Cards/StS2 data/Colorless');
+  const data = await cardGroup('Colorless');
   const items = Object.entries(data)
     .filter(([, c]) => c.Rarity === 'Curse' && !c.Multiplayer)
     .map(([name, c]) => {
       const id = slug(name);
       translate(`curses/${id}`, 'cards', name, c.Text, { keywords: true });
-      return { id, name, cost: playCost(c.Cost), text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300 }) };
+      return { id, name, cost: playCost(c.Cost), text: formatText(c.Text), img: image(c.Image, 'curses', id, { height: 300, beta: c.ImageBeta }) };
     });
   return { id: 'curses', name: 'Curses', tile: 'card', items };
 }
@@ -651,10 +682,10 @@ async function buildGlossary(categories) {
   }
   // 티어표에 없는 카드(토큰·퀘스트·상태이상·기본 카드)
   for (const group of [...CHARACTERS.map(c => c.en), 'Colorless']) {
-    for (const [name, c] of Object.entries(await tryModule(`Module:Cards/StS2 data/${group}`))) {
+    for (const [name, c] of Object.entries(await cardGroup(group))) {
       if (CARD_RARITIES.includes(c.Rarity) || c.Rarity === 'Curse') continue;
       const key = `card:${slug(name)}`;
-      if (!defs.has(key)) defs.set(key, { name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''), raw: c.Text, img: c.Image, type: 'card', cost: playCost(c.Cost), cardType: c.Type });
+      if (!defs.has(key)) defs.set(key, { name: name.replace(/\s*\((Ironclad|Silent|Regent|Necrobinder|Defect)\)$/, ''), raw: c.Text, img: c.Image, imgBeta: c.ImageBeta, type: 'card', cost: playCost(c.Cost), cardType: c.Type });
     }
   }
 
@@ -722,7 +753,7 @@ async function buildGlossary(categories) {
       name: d.name, type: d.type, text,
       cost: d.cost ?? undefined, cardType: d.cardType ? String(d.cardType).toLowerCase() : undefined,
       refs: used.size ? [...used] : undefined,
-      img: d.type === 'card' ? image(d.img, 'cards-extra', id, { height: 300 })
+      img: d.type === 'card' ? image(d.img, 'cards-extra', id, { height: 300, beta: d.imgBeta })
         : d.type === 'potion' ? image(d.img, 'potions-extra', id, { height: 128, width: 128 })
         : image(d.img, 'terms', id, { height: 64, width: 64 }),
     };
