@@ -17,21 +17,17 @@ jobs:
           rm -rf raw && mkdir -p raw/check
           api() { curl -sS -A "$UA" "$W/api.php?format=json&$1"; sleep 1; }
           enc() { node -e 'console.log(encodeURIComponent(process.argv[1]))' "$1"; }
-          for p in Cards Relics Potions Keywords Powers Enemies Events; do
-            api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=$p" > "raw/check/mod-$p.json"
-          done
-          # 옮겨졌는지: 예전 이름의 이동 기록과 최근 변경
-          api "action=query&list=logevents&letype=move&lelimit=100&lenamespace=828" > raw/check/moves.json
-          api "action=query&list=logevents&letype=delete&lelimit=50&lenamespace=828" > raw/check/deletes.json
-          api "action=query&list=recentchanges&rcnamespace=828&rclimit=200&rcprop=title|timestamp|comment|user|sizes" > raw/check/recent.json
-          for t in "Module:Cards/StS2 data" "Module:Cards/StS2 data/Ironclad" "Module:Cards/StS2 data/Silent" "Module:Relics/StS2 data" "Module:Potions/StS2 data" "Module:Cards/StS2 filtering"; do
+          for t in "Module:Cards" "Module:Cards/doc" "Module:Cards/filtering" "Module:Cards/tooltip" "Template:Card Infobox" "Slay the Spire 2:Crimson Mantle"; do
             f=$(echo "$t" | sed 's/[^A-Za-z0-9._-]/_/g')
-            curl -sS -A "$UA" -o "raw/check/$f.lua" -w "$t %{http_code} %{size_download}\n" "$W/index.php?title=$(enc "$t")&action=raw" || true
+            curl -sS -A "$UA" -o "raw/check/$f.txt" -w "$t %{http_code} %{size_download}\n" "$W/index.php?title=$(enc "$t")&action=raw" || true
             sleep 1
           done
+          api "action=cargotables" > raw/check/cargotables.json
+          api "action=cargoquery&tables=StS2_Cards&fields=_pageName,Name,Cost,Rarity,Type,Color,Image,Description&limit=3" > raw/check/cargo-try1.json
+          api "action=cargoquery&tables=Cards&fields=_pageName&limit=3" > raw/check/cargo-try2.json
       - name: 커밋
         run: |
           git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "위키 구조 확인 (임시)" && git push
+          git commit -qm "위키 구조 확인 2 (임시)" && git push
