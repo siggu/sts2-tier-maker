@@ -5,27 +5,30 @@ on:
 permissions:
   contents: write
 jobs:
-  data:
+  probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: fix/wiki-cargo
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: tools/package-lock.json
-      - run: npm ci
-        working-directory: tools
-      - run: npm test
-        working-directory: tools
-      - name: 데이터·이미지 수집 (Cargo)
-        run: node tools/fetch-data.mjs
-      - name: fix/wiki-cargo 에 커밋
+      - name: 한국어 카드 그림 후보 확인
         run: |
-          git add site/data
+          set -u
+          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+          rm -rf raw && mkdir -p raw/ko
+          get() { curl -sS -L -A "$UA" -o "raw/ko/$1" -w "$2 %{http_code} %{content_type} %{size_download}\n" "$2" >> raw/ko/status.txt || echo "$2 FAIL" >> raw/ko/status.txt; sleep 1; }
+          get untapped-ko-page.html "https://sts2.untapped.gg/ko/cards/crimson-mantle"
+          get untapped-ko-og.png "https://img-preview.untapped.gg/sts2/ko/cards/crimson-mantle.png"
+          get untapped-en-og.png "https://img-preview.untapped.gg/sts2/en/cards/crimson-mantle.png"
+          get opgg-ko-cards.html "https://op.gg/ko/slay-the-spire2/cards"
+          get opgg-ko-card.html "https://op.gg/ko/slay-the-spire2/cards/crimson-mantle"
+          get codex-home.html "https://spire-codex.com/"
+          get codex-ko-cards.html "https://spire-codex.com/ko/cards"
+          get codex-card.html "https://spire-codex.com/cards/crimson-mantle"
+          # 페이지 속 이미지 주소
+          for f in raw/ko/*.html; do echo "== $f" >> raw/ko/imgs.txt; grep -oE '(https?:)?//[^"'"'"' )]+\.(png|webp|jpg)[^"'"'"' )]*' "$f" | sort -u | head -40 >> raw/ko/imgs.txt || true; grep -oE '<meta property="og:image" content="[^"]*"' "$f" >> raw/ko/imgs.txt || true; done
+          cat raw/ko/status.txt
+      - name: 커밋
+        run: |
+          git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "data: 위키 데이터 갱신 (Cargo 카드)" && git push origin HEAD:fix/wiki-cargo
+          git commit -qm "한국어 카드 그림 확인 (임시)" && git push
