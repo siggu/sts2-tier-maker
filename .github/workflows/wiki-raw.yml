@@ -17,17 +17,15 @@ jobs:
           rm -rf raw && mkdir -p raw/check
           api() { curl -sS -A "$UA" "$W/api.php?format=json&$1"; sleep 1; }
           enc() { node -e 'console.log(encodeURIComponent(process.argv[1]))' "$1"; }
-          for t in "Module:Cards" "Module:Cards/doc" "Module:Cards/filtering" "Module:Cards/tooltip" "Template:Card Infobox" "Slay the Spire 2:Crimson Mantle"; do
-            f=$(echo "$t" | sed 's/[^A-Za-z0-9._-]/_/g')
-            curl -sS -A "$UA" -o "raw/check/$f.txt" -w "$t %{http_code} %{size_download}\n" "$W/index.php?title=$(enc "$t")&action=raw" || true
-            sleep 1
-          done
-          api "action=cargotables" > raw/check/cargotables.json
-          api "action=cargoquery&tables=StS2_Cards&fields=_pageName,Name,Cost,Rarity,Type,Color,Image,Description&limit=3" > raw/check/cargo-try1.json
-          api "action=cargoquery&tables=Cards&fields=_pageName&limit=3" > raw/check/cargo-try2.json
+          F='_pageName,Name,Game,Image,Color,OverrideColor,Type,Rarity,Cost,CostPlus,StarCost,NoUpgrade,MultiplayerOnly,Tags,Description'
+          api "action=cargoquery&tables=Cards&fields=$F&where=$(enc 'Name IN ("Crimson Mantle","Bash","Dowsing","Royal Gamble","Mad Science","Strike (Ironclad)","Juggernaut","Expect a Fight","Shiv","Ascender'"'"'s Bane")')&limit=50" > raw/check/cargo-sample.json
+          api "action=cargoquery&tables=Cards&fields=Game,COUNT(*)=n&group_by=Game&limit=50" > raw/check/cargo-games.json
+          api "action=cargoquery&tables=CardArt&fields=_pageName&limit=5" > raw/check/cargo-art.json
+          api "action=cargofields&table=CardArt" > raw/check/cargo-art-fields.json
+          api "action=cargofields&table=Cards" > raw/check/cargo-card-fields.json
       - name: 커밋
         run: |
           git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "위키 구조 확인 2 (임시)" && git push
+          git commit -qm "위키 구조 확인 3 (임시)" && git push
