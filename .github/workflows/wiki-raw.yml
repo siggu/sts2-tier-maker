@@ -9,26 +9,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 한국어 카드 그림 후보 확인
+      - name: 카드 틀 재료 찾기
         run: |
           set -u
-          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
-          rm -rf raw && mkdir -p raw/ko
-          get() { curl -sS -L -A "$UA" -o "raw/ko/$1" -w "$2 %{http_code} %{content_type} %{size_download}\n" "$2" >> raw/ko/status.txt || echo "$2 FAIL" >> raw/ko/status.txt; sleep 1; }
-          get untapped-ko-page.html "https://sts2.untapped.gg/ko/cards/crimson-mantle"
-          get untapped-ko-og.png "https://img-preview.untapped.gg/sts2/ko/cards/crimson-mantle.png"
-          get untapped-en-og.png "https://img-preview.untapped.gg/sts2/en/cards/crimson-mantle.png"
-          get opgg-ko-cards.html "https://op.gg/ko/slay-the-spire2/cards"
-          get opgg-ko-card.html "https://op.gg/ko/slay-the-spire2/cards/crimson-mantle"
-          get codex-home.html "https://spire-codex.com/"
-          get codex-ko-cards.html "https://spire-codex.com/ko/cards"
-          get codex-card.html "https://spire-codex.com/cards/crimson-mantle"
-          # 페이지 속 이미지 주소
-          for f in raw/ko/*.html; do echo "== $f" >> raw/ko/imgs.txt; grep -oE '(https?:)?//[^"'"'"' )]+\.(png|webp|jpg)[^"'"'"' )]*' "$f" | sort -u | head -40 >> raw/ko/imgs.txt || true; grep -oE '<meta property="og:image" content="[^"]*"' "$f" >> raw/ko/imgs.txt || true; done
-          cat raw/ko/status.txt
+          rm -rf raw && mkdir -p raw/frame
+          node -e '
+            const UA = { "User-Agent": "sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)" };
+            const W = "https://slaythespire.wiki.gg/api.php?format=json&formatversion=2&";
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            (async () => {
+              const out = {};
+              for (const prefix of ["StS2 Card", "StS2_Card", "StS2 Frame", "StS2 Banner", "StS2 Portrait", "StS2 Energy", "StS2 Orb", "StS2 Rarity", "StS2 UI", "StS2 Template", "StS2 Blank", "StS2 Star", "StS2 Ironclad-Strike", "StS2 Beta-Ironclad"]) {
+                const r = await (await fetch(W + new URLSearchParams({ action: "query", list: "allimages", aiprefix: prefix, ailimit: "500", aiprop: "url|size" }), { headers: UA })).json();
+                out[prefix] = (r.query?.allimages || []).map(f => `${f.name} ${f.width}x${f.height} ${f.url}`);
+                await sleep(700);
+              }
+              for (const q of ["card frame", "card banner", "card template", "frame attack", "card background"]) {
+                const r = await (await fetch(W + new URLSearchParams({ action: "query", list: "search", srnamespace: "6", srsearch: q, srlimit: "50" }), { headers: UA })).json();
+                out["search: " + q] = (r.query?.search || []).map(p => p.title);
+                await sleep(700);
+              }
+              require("fs").writeFileSync("raw/frame/list.json", JSON.stringify(out, null, 1));
+            })();'
       - name: 커밋
         run: |
           git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "한국어 카드 그림 확인 (임시)" && git push
+          git commit -qm "카드 틀 재료 (임시)" && git push
