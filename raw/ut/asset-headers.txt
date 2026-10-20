@@ -1,0 +1,30 @@
+HTTP/2 200 
+date: Tue, 20 Oct 2026 06:20:09 GMT
+content-type: image/webp
+content-length: 64578
+x-amz-id-2: KlRFkHB0bQiqvlNzqhQZLts15gquM/URSaBRQhM9SwTukNUMSWAIcp7vpMzF4xAkHoZLSFqS9KU=
+--- https://sts2json.untapped.gg/art/backgrounds/character/ironclad.webp
+HTTP/2 200 
+date: Tue, 20 Oct 2026 06:20:09 GMT
+content-type: image/webp
+content-length: 88096
+x-amz-id-2: ohkECMqXmg0Lb6QlIJmvANKjirhR3xpcoTO+fPveY/7BpCBd6nHYoDEjzsCV51k4ULDYf89PIFY=
+--- https://sts2json.untapped.gg/art/backgrounds/character/regent.webp
+HTTP/2 200 
+date: Tue, 20 Oct 2026 06:20:09 GMT
+content-type: image/png
+content-length: 74318
+x-amz-id-2: pn5g/Aq1KbcCrcpj301N3mYcelw8prd+r+CcYJGCbGQmGJU25J9od9n6r0RWUVJsDAT2Y0VuuLCsU/VsH5qXbIx4Pc5W8Llh
+--- https://sts2json.untapped.gg/art/card_layers/banner_ancient.png
+HTTP/2 200 
+date: Tue, 20 Oct 2026 06:20:09 GMT
+content-type: image/png
+content-length: 44883
+x-amz-id-2: E5ow+qVTo1cmEO5wAhqDPYE27SwBAfG7DgGEdeQYitBqWccVXtFkNRNSyLoQo1KnqMnDgBPmxjhPfJnCS305fcMyyuuxDjz/
+--- https://sts2json.untapped.gg/art/card_layers/banner_common.png
+HTTP/2 200 
+date: Tue, 20 Oct 2026 06:20:09 GMT
+content-type: image/png
+content-length: 47935
+x-amz-id-2: Y97nhA3s3GMnsMLor3QR05xb6Gcsx7R/ytrgVjk5a8yZIaHEykGhrJONrU9D6S+mHg8Y2eg+W9E=
+--- https://sts2json.untapped.gg/art/card_layers/banner_curse.png
