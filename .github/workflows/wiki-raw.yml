@@ -9,44 +9,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 카드 조립 재료 받기
+      - name: untapped 카드 HTML·CSS 받기
         run: |
           set -u
-          rm -rf raw && mkdir -p raw/cardkit
-          node -e '
-            const UA = { "User-Agent": "sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)" };
-            const sleep = ms => new Promise(r => setTimeout(r, ms));
-            const files = [
-              ...["Attack","Skill","Power"].flatMap(t => ["Common","Uncommon","Rare","Event"].map(r => `StS2_Frame${t}${r}.png`)),
-              "StS2_FrameCurse.png","StS2_FrameQuest.png","StS2_FrameStatus.png",
-              ...["Ancient","Common","Curse","Event","Quest","Rare","Status","Uncommon"].map(r => `StS2_Banner${r}.png`),
-              ...["Colorless","Defect","Ironclad","Necrobinder","Regent","Silent"].map(c => `StS2_Card${c}Orb.png`),
-              "StS2_CardStars.png","StS2_StarRegent.png",
-              ...["Colorless","Defect","Ironclad","Necrobinder","Regent","Silent"].map(c => `StS2_Energy${c}.png`),
-            ];
-            const cards = ["Bash","Anticipate","Devastate","Crimson Mantle","Eidolon","Bulk Up","Abundance","Byrd Swoop","Minion Strike","Ascender\x27s Bane","Beckon","Byrdonis Egg"];
-            (async () => {
-              const q = new URLSearchParams({ action: "cargoquery", format: "json", tables: "CardArt", fields: "Name,Art,BetaArt,FullCard,FullCardBeta", where: `Game="2" AND Name IN (${cards.map(c => JSON.stringify(c)).join(",")})`, limit: "50" });
-              const art = (await (await fetch("https://slaythespire.wiki.gg/api.php?" + q, { headers: UA })).json()).cargoquery.map(x => x.title);
-              require("fs").writeFileSync("raw/cardkit/art.json", JSON.stringify(art, null, 1));
-              for (const a of art) for (const k of ["Art", "BetaArt", "FullCard", "FullCardBeta"]) if (a[k]) files.push(a[k].replace(/ /g, "_"));
-              for (let i = 0; i < files.length; i += 40) {
-                const chunk = files.slice(i, i + 40);
-                const r = await (await fetch("https://slaythespire.wiki.gg/api.php?" + new URLSearchParams({ action: "query", format: "json", formatversion: "2", prop: "imageinfo", iiprop: "url", titles: chunk.map(f => "File:" + f).join("|") }), { headers: UA })).json();
-                for (const p of r.query.pages) {
-                  const url = p.imageinfo?.[0]?.url;
-                  if (!url) { console.log("없음", p.title); continue; }
-                  const buf = Buffer.from(await (await fetch(url, { headers: UA })).arrayBuffer());
-                  require("fs").writeFileSync("raw/cardkit/" + p.title.replace(/^File:/, "").replace(/ /g, "_"), buf);
-                  await sleep(150);
-                }
-                await sleep(700);
-              }
-            })();'
-          ls raw/cardkit | wc -l
+          rm -rf raw && mkdir -p raw/ut/css
+          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
+          for p in ko/cards/crimson-mantle ko/cards/abundance ko/cards/devastate ko/cards/ascenders-bane en/cards/crimson-mantle ja/cards/crimson-mantle; do
+            curl -sS -L -A "$UA" -o "raw/ut/$(echo $p | tr / _).html" "https://sts2.untapped.gg/$p"; sleep 1
+          done
+          grep -ohE '/_next/static/[^"'"'"' ]+\.css' raw/ut/*.html | sort -u > raw/ut/css-list.txt
+          while read -r c; do curl -sS -A "$UA" -o "raw/ut/css/$(basename "$c")" "https://sts2.untapped.gg$c"; sleep 0.5; done < raw/ut/css-list.txt
+          # 카드 조립에 쓰는 그림 주소 몇 개 (헤더만)
+          grep -ohE 'https://sts2json\.untapped\.gg/[^"'"'"' )\\]+' raw/ut/*.html | sort -u > raw/ut/asset-urls.txt
+          grep -ohE 'https://[a-z0-9.-]*untapped\.gg/[^"'"'"' )\\]+\.(webp|png|woff2?|ttf|otf)' raw/ut/css/*.css | sort -u > raw/ut/css-asset-urls.txt || true
+          head -5 raw/ut/asset-urls.txt | while read -r u; do curl -sSI -A "$UA" "$u" | head -5 >> raw/ut/asset-headers.txt; echo "--- $u" >> raw/ut/asset-headers.txt; done
+          ls -la raw/ut raw/ut/css
       - name: 커밋
         run: |
           git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "카드 조립 재료 (임시)" && git push
+          git commit -qm "untapped 카드 HTML (임시)" && git push
