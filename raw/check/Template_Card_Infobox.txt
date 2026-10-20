@@ -1,0 +1,282 @@
+<noinclude>
+{{Uses Cargo|Type=Attach|Cards,CardArt,KeywordPowerSources}}
+{{Uses Lua|Cards#defineImageVariables, Cards#getStacked, Cards#colorCardName, Cards#colorCardCost, Cards#parse_description, Cargo Keywords#descriptionToList, Infobox#main}}
+<!--
+//// Attaching Cargo tables so they can be added to ////
+-->{{#cargo_attach: _table = KeywordPowerSources}}<br>
+{{#cargo_attach: _table = CardArt}}<br>
+{{#cargo_attach: _table=Cards}}
+</noinclude><!--
+--><includeonly><!--
+
+// Defining variables for the current game (sts1, sts2, or the board game) and the visual color of the card
+
+-->{{#vardefine:game|{{#or: {{{Sequel|}}}|{{{Game|}}}|{{AutoSequel}}}}}}<!--
+-->{{#vardefine:visual_color|{{#ifeq:{{{OverrideColor|}}}||{{{Color|}}}|{{{OverrideColor}}}}}}}<!--
+-->{{#vardefine:rarity|{{#ifeq:{{{Type}}}|Curse|Curse|{{{Rarity}}}}}}}<!--
+
+-->{{#ifeq:{{{Name|}}}| |<!--
+// If the infobox was called like this: {{Card Infobox|Bash||2}}, use the Lua Card Infobox template instead.
+-->{{Lua Card Infobox|{{{1|}}}|{{{2|}}}|{{{3|1}}}|UpgradeImgOverride={{{UpgradeImgOverride|}}}}}<!--
+
+// Define image variables
+-->| {{#invoke:Cards|defineImageVariables<!--
+    -->|{{{Image}}}<!--
+	-->|{{{NoUpgrade}}}<!--
+	-->|{{#var:game}}<!--
+	-->|{{{Name}}}<!--
+	-->|{{#var:visual_color}}<!--
+	-->|{{#var:rarity}}<!--
+	-->|{{{Type}}}<!--
+-->}}<!--
+
+// Defining Cargo data. Stores in 3 different tables:
+- Cards: Stores most of the data for cards.
+- CardArt: Stores image links for all possible images a card has
+- KeywordPowerSources: Used for querying where a particular keyword or effect is gained from
+
+// Data will not be stored if the NoStore parameter is given
+
+-->{{#ifeq:{{{NoStore|}}}| | <!--
+
+-->{{#cargo_store: _table = Cards
+| Link = {{urlencode:{{#or:{{{Link|}}}|{{FULLPAGENAME}}}}|WIKI}}
+| Game = {{#var:game}}
+| Name = {{{Name}}}
+| Image = {{{Image}}}
+| Color = {{{Color}}}
+| OverrideColor = {{#var:visual_color}}
+| Type = {{{Type}}}
+| Rarity = {{#var:rarity}}
+| Cost = {{{Cost|}}}
+| CostPlus = {{{CostPlus|}}}
+| StarCost = {{{StarCost|}}}
+| Description = {{{Description|{{{Text}}}}}}
+| NoUpgrade = {{{NoUpgrade|false}}}
+| HasBeta = {{#var:card_info_hasbeta}}
+| MultiplayerOnly = {{{MultiplayerOnly|false}}}
+| Tags = {{{Tags|}}}
+}}<!--
+
+-->{{#if:{{{Description|}}}<!-- this is so The Cards Preload doesn't create data
+-->|{{#cargo_store: _table = CardArt
+| Link = {{urlencode:{{#or:{{{Link|}}}|{{FULLPAGENAME}}}}|WIKI}}
+| Game = {{#var:game}}
+| Name = {{{Name}}}
+| Art = {{#var:card_art}}
+| Icon = {{#var:card_icon}}
+| BetaArt = {{#var:card_artbeta}}
+| FullCard = {{#var:card_image}}
+| FullCardPlus = {{#var:card_imageplus}}
+| FullCardBeta = {{#var:card_imagebeta}}
+| FullCardBetaPlus = {{#if:{{{NoUpgrade|}}}||{{#var:card_imagebetaplus}}}}
+}}}}<!--
+
+-->{{Keyword Power Sources
+|Keywords = {{#:Cargo Keywords|descriptionToList|{{{Description|{{{Text}}}}}}}}, {{{Keywords|}}}
+|InteractsWith = {{{InteractsWith|}}}
+|GivesToPlayer = {{{GivesToPlayer|}}}
+|GivesToEnemy = {{{GivesToEnemy|}}}
+|PowerGives = {{{PowerGives|}}}
+|Source = {{{Name|}}}
+|Game = {{#var:game}}
+|Type = Card
+}}<!--
+
+-->{{Card Infobox/DefineCardsTable/attach}}<!--
+-->{{Card Infobox/DefineImageTable/attach}}<!--
+-->{{Keyword Power Sources/attach}}}}<!--
+
+-->{{#setmainimage:{{#var:card_art}}|quiet}}<!--
+
+-->{{#invoke:Infobox|main|kind=card-infobox|sep=,|image=
+
+<!--
+// These tabs are not visible and are instead controlled by custom checkboxes
+// Checkboxes are added by [[MediaWiki:Gadgets/druidScripts/main.js]]
+-->
+|tabs=Base{{#if:{{{NoUpgrade|}}}||,Upgraded}}{{#ifeq:{{#var:card_info_hasbeta}}|true|,Beta Art,Upgraded Beta|}}
+
+|sections=Top,Main,Image Links
+
+|Top=Rarity Char
+|Top_nolabel=yes
+
+|Main=Card Image,Name,Energy Cost,Star Cost,Type,Description
+|Main_nolabel=yes
+|Main_class={{#ifeq:{{#var:game}}|2|card-infobox-main-section-sts2|card-infobox-main-section}}
+
+|Image Links=Art Link,Full Card Link
+|Image Links_nolabel=yes
+|Image Links_class=card-infobox-links-section
+
+|title={{{Name}}}
+
+<!-- /// Top Section /// -->
+
+|Rarity Char=<!--
+-->{{#ifeq:{{{Type}}}|Curse<!--
+    -->|{{FilteredQuery|Cards|Text=Curse|Type=Curse|Sequel={{#var:game}}|ColorLink=true}}<!--
+    -->|{{FilteredQuery|Cards|Text={{{Rarity}}}|Rarity={{{Rarity}}}|Sequel={{#var:game}}|ColorLink=true}}<!--
+-->}} {{FilteredQuery|Cards|Text={{{Color}}}|Color={{{Color}}}|Sequel={{#var:game}}}} Card
+|Rarity Char_nolabel=yes
+|Rarity Char_class=card-infobox-rarity-class
+
+<!-- /// Main section. ///
+The Card Image field returns a stacked set of images, all other fields in the Main section are positioned over these images.
+-->
+
+|Card Image={{#invoke:Cards|getStacked<!--
+    -->|{{{Name}}}<!--
+    -->|350<!--
+    -->|false<!--
+    -->|{{#var:game}}<!--
+    -->|{{{Image}}}<!--
+    -->|{{{Color}}}<!--
+    -->|{{#var:rarity}}<!--
+    -->|{{{Type}}}<!--
+    -->|{{{Cost}}}<!--
+    -->|{{{StarCost|}}}<!--
+    -->|{{{NoUpgrade|false}}}<!--
+    -->|{{{OverrideColor|}}}<!--
+-->}}
+|Upgraded_Card Image={{#invoke:Cards|getStacked<!--
+    -->|{{{Name}}}<!--
+    -->|350<!--
+    -->|false<!--
+    -->|{{#var:game}}<!--
+    -->|{{{Image}}}<!--
+    -->|{{{Color}}}<!--
+    -->|{{#var:rarity}}<!--
+    -->|{{{Type}}}<!--
+    -->|{{{Cost}}}<!--
+    -->|{{{StarCost|}}}<!--
+    -->|{{{NoUpgrade|false}}}<!--
+    -->|{{{OverrideColor|}}}<!--
+	-->|{{{UpgradeArtOverride|}}}<!--
+-->}}
+|Beta Art_Card Image={{#invoke:Cards|getStacked<!--
+    -->|{{{Name}}}<!--
+    -->|350<!--
+    -->|true<!--
+    -->|{{#var:game}}<!--
+    -->|{{{Image}}}<!--
+    -->|{{{Color}}}<!--
+    -->|{{#var:rarity}}<!--
+    -->|{{{Type}}}<!--
+    -->|{{{Cost}}}<!--
+    -->|{{{StarCost|}}}<!--
+    -->|{{{NoUpgrade|false}}}<!--
+    -->|{{{OverrideColor|}}}<!--
+-->}}
+|Upgraded Beta_Card Image={{#invoke:Cards|getStacked<!--
+    -->|{{{Name}}}<!--
+    -->|350<!--
+    -->|true<!--
+    -->|{{#var:game}}<!--
+    -->|{{{Image}}}<!--
+    -->|{{{Color}}}<!--
+    -->|{{#var:rarity}}<!--
+    -->|{{{Type}}}<!--
+    -->|{{{Cost}}}<!--
+    -->|{{{StarCost|}}}<!--
+    -->|{{{NoUpgrade|false}}}<!--
+    -->|{{{OverrideColor|}}}<!--
+	-->|{{{UpgradeArtOverride|}}}<!--
+-->}}
+
+|Card Image_nolabel=yes
+|Card Image_class=card-infobox-image
+
+|Name={{#ifeq:{{#var:game}}|2<!--
+    -->|{{#invoke:Cards|colorCardName|{{{DisplayName|{{{Name}}}}}}|{{{Rarity}}}}}<!--
+    -->|{{{DisplayName|{{{Name}}}}}}<!--
+-->}}
+|Upgraded_Name=<span class="card-name-upgraded-sts{{#ifeq:{{#var:game}}|B|1|{{#var:game}}}}"><!--
+    -->{{{DisplayName|{{{Name}}}}}}+<!--
+--></span>
+|Upgraded Beta_Name=<span class="card-name-upgraded-sts{{#ifeq:{{#var:game}}|B|1|{{#var:game}}}}"><!--or it could be a 'template changes' announcement 
+    -->{{{DisplayName|{{{Name}}}}}}+<!--
+--></span>
+|Name_nolabel=yes
+|Name_class=card-infobox-name
+
+{{#vardefine:CardCost| {{#switch:{{{Cost}}}
+|-1 = X
+|-2|Unplayable =
+|#default = {{{Cost|}}}
+}} }}
+
+|Base_Energy Cost={{#ifeq:{{#var:game}}|2<!--
+    -->|{{#invoke:Cards|colorCardCost|{{#var:CardCost}}|{{#var:visual_color}}}}<!--
+    -->|{{#var:CardCost}}
+}}
+|Beta Art_Energy Cost={{#ifeq:{{#var:game}}|2<!--
+    -->|{{#invoke:Cards|colorCardCost|{{#var:CardCost}}|{{#var:visual_color}}}}<!--
+    -->|{{#var:CardCost}}
+}}
+|Upgraded_Energy Cost={{#ifeq:{{{CostPlus|{{{Cost}}}}}}|{{{Cost}}}<!--
+    -->|{{#ifeq:{{#var:game}}|2<!--
+        -->|{{#invoke:Cards|colorCardCost|{{#var:CardCost}}|{{#var:visual_color}}}}<!--
+		-->|{{#var:CardCost}}<!--
+    -->}}<!--
+    -->|<span class="card-cost-upgraded">{{{CostPlus}}}</span>
+}}
+|Upgraded Beta_Energy Cost={{#ifeq:{{{CostPlus|{{{Cost}}}}}}|{{{Cost}}}<!--
+    -->|{{#ifeq:{{#var:game}}|2<!--
+        -->|{{#invoke:Cards|colorCardCost|{{#var:CardCost}}|{{#var:visual_color}}}}<!--
+		-->|{{#var:CardCost}}<!--
+    -->}}<!--
+    -->|<span class="card-cost-upgraded">{{{CostPlus}}}</span>
+}}
+|Energy Cost_nolabel=yes
+|Energy Cost_class=card-infobox-cost
+
+{{#vardefine:CardStarCost| {{#switch:{{{StarCost}}}
+|-1 = X
+|#default = {{{StarCost|}}}
+}} }}
+
+|Star Cost={{#var:CardStarCost}}
+|Star Cost_nolabel=yes
+|Star Cost_class=card-infobox-starcost
+
+|Type={{FilteredQuery|Cards|Sequel={{#var:game}}|Text={{{Type}}}|Type={{{Type}}}}}
+|Type_nolabel=yes
+|Type_class=card-infobox-type
+
+<!-- game-highlight class will color all links in them to yellow, the same color as Keywords in-game. Red links will stay red. -->
+|Base_Description=<div class='game-highlight remove-icons'><!--
+    -->{{#invoke:Cards|parse_description|{{{Description}}}|false}}<!--
+--></div>
+|Beta Art_Description=<div class='game-highlight remove-icons'><!--
+    -->{{#invoke:Cards|parse_description|{{{Description}}}|false}}<!--
+--></div>
+|Upgraded_Description=<div class='game-highlight remove-icons'><!--
+    -->{{#invoke:Cards|parse_description|{{{Description}}}|true}}<!--
+--></div>
+|Upgraded Beta_Description=<div class='game-highlight remove-icons'><!--
+    -->{{#invoke:Cards|parse_description|{{{Description}}}|true}}<!--
+--></div>
+|Description_nolabel=yes
+|Description_class=card-infobox-description
+
+<!--
+/// Links section ///
+Contains links to the art and full images. Changes depending on what tab is currently selected.
+-->
+
+|Art Link=[[:File:{{#var:card_art}}|Card Art]]
+|Beta Art_Art Link=[[:File:{{#var:card_artbeta}}|Beta Card Art]]
+|Upgraded Beta_Art Link=[[:File:{{#var:card_artbeta}}|Beta Card Art]]
+|Art Link_nolabel=yes
+
+|Full Card Link=[[:File:{{#var:card_image}}|Full Card]]
+|Upgraded_Full Card Link=[[:File:{{#var:card_imageplus}}|Upgraded Full Card]]
+|Beta Art_Full Card Link=[[:File:{{#var:card_imagebeta}}|Beta Art Full Card]]
+|Upgraded Beta_Full Card Link=[[:File:{{#var:card_imagebetaplus}}|Upgraded Beta Full Card]]
+|Full Card Link_nolabel=yes
+}}<!--
+-->{{#if:{{#var:MajorInfobox}}|[[Category:Pages with multiple Major Infoboxes]]}}<!--
+-->{{#vardefine:MajorInfobox|true}}<!--
+-->}}</includeonly><noinclude>{{documentation}}[[Category:Infobox templates]]</noinclude>
