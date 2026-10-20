@@ -1,0 +1,8 @@
+https://sts2.untapped.gg/ko/cards/crimson-mantle 200 text/html; charset=utf-8 346397
+https://img-preview.untapped.gg/sts2/ko/cards/crimson-mantle.png 200 image/png 327924
+https://img-preview.untapped.gg/sts2/en/cards/crimson-mantle.png 200 image/png 339361
+https://op.gg/ko/slay-the-spire2/cards 200 text/html; charset=utf-8 3046126
+https://op.gg/ko/slay-the-spire2/cards/crimson-mantle 404 text/html; charset=utf-8 99364
+https://spire-codex.com/ 200 text/html; charset=utf-8 200797
+https://spire-codex.com/ko/cards 404 text/html; charset=utf-8 63227
+https://spire-codex.com/cards/crimson-mantle 404 text/html; charset=utf-8 64841
