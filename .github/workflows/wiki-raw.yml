@@ -9,31 +9,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 카드 틀 재료 찾기
+      - name: 카드 조립 재료 받기
         run: |
           set -u
-          rm -rf raw && mkdir -p raw/frame
+          rm -rf raw && mkdir -p raw/cardkit
           node -e '
             const UA = { "User-Agent": "sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)" };
-            const W = "https://slaythespire.wiki.gg/api.php?format=json&formatversion=2&";
             const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const files = [
+              ...["Attack","Skill","Power"].flatMap(t => ["Common","Uncommon","Rare","Event"].map(r => `StS2_Frame${t}${r}.png`)),
+              "StS2_FrameCurse.png","StS2_FrameQuest.png","StS2_FrameStatus.png",
+              ...["Ancient","Common","Curse","Event","Quest","Rare","Status","Uncommon"].map(r => `StS2_Banner${r}.png`),
+              ...["Colorless","Defect","Ironclad","Necrobinder","Regent","Silent"].map(c => `StS2_Card${c}Orb.png`),
+              "StS2_CardStars.png","StS2_StarRegent.png",
+              ...["Colorless","Defect","Ironclad","Necrobinder","Regent","Silent"].map(c => `StS2_Energy${c}.png`),
+            ];
+            const cards = ["Bash","Anticipate","Devastate","Crimson Mantle","Eidolon","Bulk Up","Abundance","Byrd Swoop","Minion Strike","Ascender\x27s Bane","Beckon","Byrdonis Egg"];
             (async () => {
-              const out = {};
-              for (const prefix of ["StS2 Card", "StS2_Card", "StS2 Frame", "StS2 Banner", "StS2 Portrait", "StS2 Energy", "StS2 Orb", "StS2 Rarity", "StS2 UI", "StS2 Template", "StS2 Blank", "StS2 Star", "StS2 Ironclad-Strike", "StS2 Beta-Ironclad"]) {
-                const r = await (await fetch(W + new URLSearchParams({ action: "query", list: "allimages", aiprefix: prefix, ailimit: "500", aiprop: "url|size" }), { headers: UA })).json();
-                out[prefix] = (r.query?.allimages || []).map(f => `${f.name} ${f.width}x${f.height} ${f.url}`);
+              const q = new URLSearchParams({ action: "cargoquery", format: "json", tables: "CardArt", fields: "Name,Art,BetaArt,FullCard,FullCardBeta", where: `Game="2" AND Name IN (${cards.map(c => JSON.stringify(c)).join(",")})`, limit: "50" });
+              const art = (await (await fetch("https://slaythespire.wiki.gg/api.php?" + q, { headers: UA })).json()).cargoquery.map(x => x.title);
+              require("fs").writeFileSync("raw/cardkit/art.json", JSON.stringify(art, null, 1));
+              for (const a of art) for (const k of ["Art", "BetaArt", "FullCard", "FullCardBeta"]) if (a[k]) files.push(a[k].replace(/ /g, "_"));
+              for (let i = 0; i < files.length; i += 40) {
+                const chunk = files.slice(i, i + 40);
+                const r = await (await fetch("https://slaythespire.wiki.gg/api.php?" + new URLSearchParams({ action: "query", format: "json", formatversion: "2", prop: "imageinfo", iiprop: "url", titles: chunk.map(f => "File:" + f).join("|") }), { headers: UA })).json();
+                for (const p of r.query.pages) {
+                  const url = p.imageinfo?.[0]?.url;
+                  if (!url) { console.log("없음", p.title); continue; }
+                  const buf = Buffer.from(await (await fetch(url, { headers: UA })).arrayBuffer());
+                  require("fs").writeFileSync("raw/cardkit/" + p.title.replace(/^File:/, "").replace(/ /g, "_"), buf);
+                  await sleep(150);
+                }
                 await sleep(700);
               }
-              for (const q of ["card frame", "card banner", "card template", "frame attack", "card background"]) {
-                const r = await (await fetch(W + new URLSearchParams({ action: "query", list: "search", srnamespace: "6", srsearch: q, srlimit: "50" }), { headers: UA })).json();
-                out["search: " + q] = (r.query?.search || []).map(p => p.title);
-                await sleep(700);
-              }
-              require("fs").writeFileSync("raw/frame/list.json", JSON.stringify(out, null, 1));
             })();'
+          ls raw/cardkit | wc -l
       - name: 커밋
         run: |
           git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "카드 틀 재료 (임시)" && git push
+          git commit -qm "카드 조립 재료 (임시)" && git push
