@@ -5,36 +5,27 @@ on:
 permissions:
   contents: write
 jobs:
-  dump:
+  data:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: 위키 카드 모듈 구조 확인
+        with:
+          ref: fix/wiki-cargo
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+      - run: npm ci
+        working-directory: tools
+      - run: npm test
+        working-directory: tools
+      - name: 데이터·이미지 수집 (Cargo)
+        run: node tools/fetch-data.mjs
+      - name: fix/wiki-cargo 에 커밋
         run: |
-          set -u
-          W=https://slaythespire.wiki.gg
-          UA='sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)'
-          rm -rf raw && mkdir -p raw/check
-          api() { curl -sS -A "$UA" "$W/api.php?format=json&$1"; sleep 1; }
-          enc() { node -e 'console.log(encodeURIComponent(process.argv[1]))' "$1"; }
-          mkdir -p raw/cargo
-          dump() { # 표 이름, 필드, 조건 → raw/cargo/표.json (500개씩)
-            node -e '
-              const [table, fields, where] = process.argv.slice(1); const all = [];
-              (async () => { for (let off = 0; ; off += 500) {
-                const qs = new URLSearchParams({ action: "cargoquery", format: "json", tables: table, fields, where, limit: "500", offset: String(off) });
-                const r = await (await fetch("https://slaythespire.wiki.gg/api.php?" + qs, { headers: { "User-Agent": "sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)" } })).json();
-                if (r.error) { console.error(r.error); process.exit(1); }
-                const rows = (r.cargoquery || []).map(x => x.title); all.push(...rows);
-                if (rows.length < 500) break; await new Promise(z => setTimeout(z, 800)); }
-                require("fs").writeFileSync("raw/cargo/" + table + ".json", JSON.stringify(all, null, 1)); console.log(table, all.length); })();' "$@"
-          }
-          dump Cards '_pageName,Name,Game,Image,Color,OverrideColor,Type,Rarity,Cost,CostPlus,StarCost,NoUpgrade,MultiplayerOnly,Tags,Description,Link' 'Game="2"'
-          dump CardArt '_pageName,Name,Game,Icon,Art,BetaArt,FullCard,FullCardPlus,FullCardBeta,FullCardBetaPlus,Link' 'Game="2"'
-          dump Relics '_pageName' '1=1' || true
-      - name: 커밋
-        run: |
-          git add -A raw
+          git add site/data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "위키 Cargo 표 (임시)" && git push
+          git commit -qm "data: 위키 데이터 갱신 (Cargo 카드)" && git push origin HEAD:fix/wiki-cargo
