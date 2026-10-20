@@ -5,25 +5,33 @@ on:
 permissions:
   contents: write
 jobs:
-  data:
+  dump:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: wip/term-popups
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: tools/package-lock.json
-      - run: npm ci
-        working-directory: tools
-      - name: 데이터·이미지 수집 (public-beta 그림 포함)
-        run: node tools/fetch-data.mjs
-      - name: wip/term-popups 에 커밋
+      - name: 위키 카드 모듈 구조 확인
         run: |
-          git add site/data
+          set -u
+          W=https://slaythespire.wiki.gg
+          UA='sts2-tier-maker/1.0 (https://github.com/siggu/sts2-tier-maker)'
+          rm -rf raw && mkdir -p raw/check
+          api() { curl -sS -A "$UA" "$W/api.php?format=json&$1"; sleep 1; }
+          enc() { node -e 'console.log(encodeURIComponent(process.argv[1]))' "$1"; }
+          for p in Cards Relics Potions Keywords Powers Enemies Events; do
+            api "action=query&list=allpages&apnamespace=828&aplimit=500&apprefix=$p" > "raw/check/mod-$p.json"
+          done
+          # 옮겨졌는지: 예전 이름의 이동 기록과 최근 변경
+          api "action=query&list=logevents&letype=move&lelimit=100&lenamespace=828" > raw/check/moves.json
+          api "action=query&list=logevents&letype=delete&lelimit=50&lenamespace=828" > raw/check/deletes.json
+          api "action=query&list=recentchanges&rcnamespace=828&rclimit=200&rcprop=title|timestamp|comment|user|sizes" > raw/check/recent.json
+          for t in "Module:Cards/StS2 data" "Module:Cards/StS2 data/Ironclad" "Module:Cards/StS2 data/Silent" "Module:Relics/StS2 data" "Module:Potions/StS2 data" "Module:Cards/StS2 filtering"; do
+            f=$(echo "$t" | sed 's/[^A-Za-z0-9._-]/_/g')
+            curl -sS -A "$UA" -o "raw/check/$f.lua" -w "$t %{http_code} %{size_download}\n" "$W/index.php?title=$(enc "$t")&action=raw" || true
+            sleep 1
+          done
+      - name: 커밋
+        run: |
+          git add -A raw
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "data: 위키 데이터 갱신 (용어 팝업)" && git push origin HEAD:wip/term-popups
+          git commit -qm "위키 구조 확인 (임시)" && git push
