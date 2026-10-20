@@ -1,0 +1,86 @@
+[
+ {
+  "Name": "Abundance",
+  "Art": "StS2 Colorless-Abundance-Art.png",
+  "BetaArt": "StS2 Beta-Colorless-Abundance-Art.png",
+  "FullCard": "StS2 Colorless-Abundance.png",
+  "FullCardBeta": "StS2 Beta-Colorless-Abundance.png"
+ },
+ {
+  "Name": "Anticipate",
+  "Art": "StS2 Silent-Anticipate-Art.png",
+  "BetaArt": "",
+  "FullCard": "StS2 Silent-Anticipate.png",
+  "FullCardBeta": ""
+ },
+ {
+  "Name": "Ascender's Bane",
+  "Art": "StS2 Curse-AscendersBane-Art.png",
+  "BetaArt": "StS2 Beta-Curse-AscendersBane-Art.png",
+  "FullCard": "StS2 Curse-AscendersBane.png",
+  "FullCardBeta": "StS2 Beta-Curse-AscendersBane.png"
+ },
+ {
+  "Name": "Bash",
+  "Art": "StS2 Ironclad-Bash-Art.png",
+  "BetaArt": "",
+  "FullCard": "StS2 Ironclad-Bash.png",
+  "FullCardBeta": ""
+ },
+ {
+  "Name": "Beckon",
+  "Art": "StS2 Colorless-Beckon-Art.png",
+  "BetaArt": "StS2 Beta-Colorless-Beckon-Art.png",
+  "FullCard": "StS2 Colorless-Beckon.png",
+  "FullCardBeta": "StS2 Beta-Colorless-Beckon.png"
+ },
+ {
+  "Name": "Bulk Up",
+  "Art": "StS2 Defect-BulkUp-Art.png",
+  "BetaArt": "StS2 Beta-Defect-BulkUp-Art.png",
+  "FullCard": "StS2 Defect-BulkUp.png",
+  "FullCardBeta": "StS2 Beta-Defect-BulkUp.png"
+ },
+ {
+  "Name": "Byrd Swoop",
+  "Art": "StS2 Colorless-ByrdSwoop-Art.png",
+  "BetaArt": "",
+  "FullCard": "StS2 Colorless-ByrdSwoop.png",
+  "FullCardBeta": ""
+ },
+ {
+  "Name": "Byrdonis Egg",
+  "Art": "StS2 Quest-ByrdonisEgg-Art.png",
+  "BetaArt": "",
+  "FullCard": "StS2 Quest-ByrdonisEgg.png",
+  "FullCardBeta": ""
+ },
+ {
+  "Name": "Crimson Mantle",
+  "Art": "StS2 Ironclad-CrimsonMantle-Art.png",
+  "BetaArt": "StS2 Beta-Ironclad-CrimsonMantle-Art.png",
+  "FullCard": "StS2 Ironclad-CrimsonMantle.png",
+  "FullCardBeta": "StS2 Beta-Ironclad-CrimsonMantle.png"
+ },
+ {
+  "Name": "Devastate",
+  "Art": "StS2 Regent-Devastate-Art.png",
+  "BetaArt": "StS2 Beta-Regent-Devastate-Art.png",
+  "FullCard": "StS2 Regent-Devastate.png",
+  "FullCardBeta": "StS2 Beta-Regent-Devastate.png"
+ },
+ {
+  "Name": "Eidolon",
+  "Art": "StS2 Necrobinder-Eidolon-Art.png",
+  "BetaArt": "StS2 Beta-Necrobinder-Eidolon-Art.png",
+  "FullCard": "StS2 Necrobinder-Eidolon.png",
+  "FullCardBeta": "StS2 Beta-Necrobinder-Eidolon.png"
+ },
+ {
+  "Name": "Minion Strike",
+  "Art": "StS2 Colorless-MinionStrike-Art.png",
+  "BetaArt": "StS2 Beta-Colorless-MinionStrike-Art.png",
+  "FullCard": "StS2 Colorless-MinionStrike.png",
+  "FullCardBeta": "StS2 Beta-Colorless-MinionStrike.png"
+ }
+]
