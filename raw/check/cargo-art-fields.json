@@ -1,0 +1,1 @@
+{"cargofields":{"Link":{"type":"Page"},"Name":{"type":"String","mandatory":""},"Game":{"type":"String","mandatory":""},"Icon":{"type":"File"},"Art":{"type":"File"},"BetaArt":{"type":"File"},"FullCard":{"type":"File"},"FullCardPlus":{"type":"File"},"FullCardBeta":{"type":"File"},"FullCardBetaPlus":{"type":"File"}}}
